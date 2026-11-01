@@ -6,6 +6,7 @@ package archtest
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os/exec"
 	"strings"
@@ -16,6 +17,8 @@ const module = "github.com/arhuman/bizkit"
 
 type rule struct {
 	forbidden string
+	// exact matches forbidden alone, not its subpackages.
+	exact bool
 	// allowedIn lists the module-relative package trees that may import forbidden.
 	allowedIn []string
 }
@@ -23,7 +26,8 @@ type rule struct {
 var rules = []rule{
 	{forbidden: "github.com/gin-gonic/gin", allowedIn: []string{"ginx"}},
 	{forbidden: "github.com/minio/minio-go", allowedIn: []string{"blob/s3"}},
-	{forbidden: "database/sql"},
+	// database/sql/driver holds interfaces only; google/uuid and rs/xid import it.
+	{forbidden: "database/sql", exact: true},
 	{forbidden: "github.com/jackc/pgx"},
 	{forbidden: "github.com/lib/pq"},
 	{forbidden: "github.com/mattn/go-sqlite3"},
@@ -51,20 +55,41 @@ func TestNoDriverOrGinOutsideAdapters(t *testing.T) {
 		rel := strings.TrimPrefix(strings.TrimPrefix(p.ImportPath, module), "/")
 		// Deps is transitive, so a package importing ginx is caught too.
 		imports := append(append(append([]string{}, p.Deps...), p.TestImports...), p.XTestImports...)
-		for _, r := range rules {
-			if within(rel, r.allowedIn) {
-				continue
-			}
-			for _, imp := range imports {
-				if matches(imp, r.forbidden) {
-					t.Errorf("%s imports %s; allowed only in %v", p.ImportPath, imp, r.allowedIn)
-				}
-			}
+		for _, v := range violations(rel, imports) {
+			t.Errorf("%s %s", p.ImportPath, v)
 		}
 	}
 	if !sawRoot {
 		t.Fatalf("go list did not report %s; the check ran on nothing", module)
 	}
+}
+
+func TestSQLDriverInterfaceAllowedTransitively(t *testing.T) {
+	if got := violations("blob", []string{"database/sql/driver"}); len(got) != 0 {
+		t.Errorf("database/sql/driver rejected: %v", got)
+	}
+	for _, imp := range []string{"database/sql", "github.com/jackc/pgx/v5"} {
+		if got := violations("blob", []string{imp}); len(got) != 1 {
+			t.Errorf("%s: got %d violations, want 1", imp, len(got))
+		}
+	}
+}
+
+// violations reports each import that a rule forbids for the package at the
+// module-relative path rel.
+func violations(rel string, imports []string) []string {
+	var out []string
+	for _, r := range rules {
+		if within(rel, r.allowedIn) {
+			continue
+		}
+		for _, imp := range imports {
+			if matches(imp, r) {
+				out = append(out, fmt.Sprintf("imports %s; allowed only in %v", imp, r.allowedIn))
+			}
+		}
+	}
+	return out
 }
 
 func listModulePackages(t *testing.T) []pkg {
@@ -92,8 +117,11 @@ func listModulePackages(t *testing.T) []pkg {
 	return pkgs
 }
 
-func matches(imp, prefix string) bool {
-	return imp == prefix || strings.HasPrefix(imp, prefix+"/")
+func matches(imp string, r rule) bool {
+	if r.exact {
+		return imp == r.forbidden
+	}
+	return imp == r.forbidden || strings.HasPrefix(imp, r.forbidden+"/")
 }
 
 func within(rel string, trees []string) bool {
