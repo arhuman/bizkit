@@ -15,7 +15,7 @@ GOVULNCHECK_VERSION ?= v1.7.0
 # ==================================================================================== #
 # PHONY DECLARATIONS (in alphabetical order)
 # ==================================================================================== #
-.PHONY: audit checklen ci cover fulltest help test test-s3 tidy tools
+.PHONY: audit checklen ci cover fulltest help release test test-s3 tidy tools
 
 # ==================================================================================== #
 # STANDARD TARGETS (in alphabetical order)
@@ -62,6 +62,10 @@ fulltest:
 help:
 	@echo 'Usage:'
 	@sed -n 's/^##//p' ${MAKEFILE_LIST} | column -t -s ':' | sed -e 's/^/ /'
+
+## release: cut and publish a release (derive version, changelog, tag, push)
+release:
+	@./scripts/release.sh
 
 ## test: short units for red/green; race and coverage run in fulltest
 test:

@@ -27,4 +27,4 @@ make test   # short unit tests
 make ci     # tidy, audit (gofmt, lint, govulncheck, coverage gate), race tests
 ```
 
-Releases are tagged `v0.x` by hand.
+Releases are cut with `make release`: the version is derived from Conventional Commits and the release is gated on `make ci`.
