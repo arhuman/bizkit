@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-01
+
 ### Added
 
 - `davfs`: WebDAV `http.Handler` over a host `Tree`, confining paths and MOVE/COPY destinations to the mount, committing a PUT only after a complete body, and answering 403 and 413 from the shared sentinel errors.
