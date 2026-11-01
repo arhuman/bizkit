@@ -1,0 +1,50 @@
+# CI workflow for the bizkit Go module, driven by the Makefile.
+# Calls `make` targets so CI and local never drift. Action/tool versions are
+# pinned to the 10x _shared/references/versions.md baseline.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (go ${{ matrix.go }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Floor = go.mod minimum (keep in sync); "stable" probes the latest release.
+        go: ["1.26", "stable"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ matrix.go }}
+          check-latest: true
+      - name: Test (race)
+        run: make fulltest
+
+  audit:
+    name: lint + vuln + coverage gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          # Not `stable`: the pinned golangci-lint must understand this toolchain.
+          go-version-file: go.mod
+      - name: Install pinned tools
+        run: |
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+      - name: Audit
+        run: make audit
