@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-01
+
 ### Added
 
 - `blob`: storage `Backend` contract with `ErrNotFound` and `ErrTooLarge`, a local filesystem backend and the `blobtest` conformance suite.
