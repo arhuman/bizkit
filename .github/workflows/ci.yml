@@ -48,3 +48,14 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
       - name: Audit
         run: make audit
+
+  s3:
+    name: S3 backend vs MinIO
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: S3 conformance (docker compose MinIO)
+        run: make test-s3

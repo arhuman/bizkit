@@ -1,0 +1,19 @@
+# Disposable MinIO for `make test-s3` only: fixed loopback port, throwaway
+# credentials, data on tmpfs. Never use this file outside tests.
+services:
+  minio:
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER: bizkit
+      MINIO_ROOT_PASSWORD: bizkit-test-secret
+    ports:
+      - "127.0.0.1:19000:9000"
+    tmpfs:
+      - /data
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10

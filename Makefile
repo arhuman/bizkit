@@ -15,7 +15,7 @@ GOVULNCHECK_VERSION ?= v1.7.0
 # ==================================================================================== #
 # PHONY DECLARATIONS (in alphabetical order)
 # ==================================================================================== #
-.PHONY: audit checklen ci cover fulltest help test tidy tools
+.PHONY: audit checklen ci cover fulltest help test test-s3 tidy tools
 
 # ==================================================================================== #
 # STANDARD TARGETS (in alphabetical order)
@@ -66,6 +66,13 @@ help:
 ## test: short units for red/green; race and coverage run in fulltest
 test:
 	go test -short ./...
+
+## test-s3: run the S3 backend suite against a disposable MinIO from docker-compose.test.yml
+test-s3:
+	docker compose -p bizkit-test -f docker-compose.test.yml up -d --wait
+	@status=0; go test -tags s3 -race -count=1 -v ./blob/s3 || status=$$?; \
+	docker compose -p bizkit-test -f docker-compose.test.yml down -v; \
+	exit $$status
 
 ## tidy: format Go code and tidy the module file
 tidy:
