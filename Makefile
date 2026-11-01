@@ -68,11 +68,14 @@ test:
 	go test -short ./...
 
 ## test-s3: run the S3 backend suite against a disposable MinIO from docker-compose.test.yml
+# Teardown output goes through a command substitution, not the caller's pipe, so a reader exiting early cannot kill it.
 test-s3:
-	docker compose -p bizkit-test -f docker-compose.test.yml up -d --wait
-	@status=0; go test -tags s3 -race -count=1 -v ./blob/s3 || status=$$?; \
-	docker compose -p bizkit-test -f docker-compose.test.yml down -v; \
-	exit $$status
+	@cleanup() { status=$$?; trap - EXIT; \
+		out=$$(docker compose -p bizkit-test -f docker-compose.test.yml down -v 2>&1) || { echo "$$out" >&2; [ $$status -ne 0 ] || status=1; }; \
+		exit $$status; }; \
+	trap cleanup EXIT; trap 'exit 129' HUP; trap 'exit 130' INT; trap 'exit 143' TERM; trap '' PIPE; \
+	docker compose -p bizkit-test -f docker-compose.test.yml up -d --wait && \
+	go test -tags s3 -race -count=1 -v ./blob/s3
 
 ## tidy: format Go code and tidy the module file
 tidy:
