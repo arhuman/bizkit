@@ -22,6 +22,9 @@
 //     bizkit.ErrForbidden answers 403 and one wrapping bizkit.ErrTooLarge
 //     answers 413. Options.MaxFileSize answers 413 too, before reading a body
 //     whose declared length is over it, and while streaming otherwise.
+//   - Bounded XML bodies: a PROPFIND, PROPPATCH or LOCK body over 1 MiB
+//     answers 413, before reading a body whose declared length is over it,
+//     and while streaming otherwise.
 //   - Bounded listing: a PROPFIND with Depth infinity, or with no Depth header
 //     (which RFC 4918 reads as infinity), answers 403 with the
 //     propfind-finite-depth precondition instead of walking the whole mount.
@@ -90,6 +93,10 @@ type Tree interface {
 	// removed an existing newName when the client asked to overwrite it.
 	Rename(ctx context.Context, oldName, newName string) error
 }
+
+// maxXMLBody caps a PROPFIND, PROPPATCH or LOCK body, which x/net/webdav
+// decodes whole: those bodies name properties and a lock owner, never content.
+const maxXMLBody = 1 << 20
 
 // Op is the kind of access a request needs on a name, passed to
 // Options.Authorize.
@@ -183,6 +190,9 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if dest != "" {
 		r2.Header.Set("Destination", h.prefix+dest)
 	}
+	if xmlMethod(r.Method) {
+		r2.Body = xmlBody{ReadCloser: http.MaxBytesReader(w, r.Body, maxXMLBody), out: out}
+	}
 	h.dav.ServeHTTP(&statusWriter{ResponseWriter: w, out: out}, r2)
 }
 
@@ -192,12 +202,33 @@ func (h *handler) refused(w http.ResponseWriter, r *http.Request) bool {
 	switch {
 	case r.Method == http.MethodPut && h.maxSize > 0 && r.ContentLength > h.maxSize:
 		writeStatus(w, http.StatusRequestEntityTooLarge)
+	case xmlMethod(r.Method) && r.ContentLength > maxXMLBody:
+		writeStatus(w, http.StatusRequestEntityTooLarge)
 	case r.Method == "PROPFIND" && infiniteDepth(r.Header):
 		writeFiniteDepthError(w)
 	default:
 		return false
 	}
 	return true
+}
+
+func xmlMethod(method string) bool {
+	return method == "PROPFIND" || method == "PROPPATCH" || method == "LOCK"
+}
+
+// xmlBody records 413 when its body goes over maxXMLBody, so statusWriter
+// replaces the 400 x/net/webdav answers for an XML body that fails to read.
+type xmlBody struct {
+	io.ReadCloser
+	out *outcome
+}
+
+func (b xmlBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+		b.out.set(http.StatusRequestEntityTooLarge)
+	}
+	return n, err
 }
 
 // scoped maps a decoded URL path to its clean Tree name, reporting false when
@@ -306,7 +337,7 @@ func writeFiniteDepthError(w http.ResponseWriter) {
 type outcomeKey struct{}
 
 // outcome carries, per request, the status a Tree error wrapping
-// ErrForbidden or ErrTooLarge calls for. x/net/webdav picks its own status for
+// ErrForbidden or ErrTooLarge, or an XML body over maxXMLBody, calls for. x/net/webdav picks its own status for
 // a failed FileSystem call (405 for any failed PUT, for instance), so
 // statusWriter replaces it with this one.
 type outcome struct {
@@ -329,10 +360,15 @@ func record(ctx context.Context, err error) {
 	default:
 		return
 	}
-	out.mu.Lock()
-	defer out.mu.Unlock()
-	if out.status == 0 {
-		out.status = status
+	out.set(status)
+}
+
+// set keeps the first status recorded.
+func (o *outcome) set(status int) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.status == 0 {
+		o.status = status
 	}
 }
 

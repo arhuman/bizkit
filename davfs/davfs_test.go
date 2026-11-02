@@ -465,3 +465,36 @@ func TestPropfind_ListingOpensNoContent(t *testing.T) {
 		t.Fatalf("Depth 1 PROPFIND made %d List and %d Open, want 1 List and 0 Open", lists, opens)
 	}
 }
+
+// xmlBodies wrap padding in a well-formed PROPFIND, PROPPATCH or LOCK body,
+// so only its size can make the request fail.
+var xmlBodies = []struct {
+	method, target, head, tail string
+}{
+	{"PROPFIND", "/dav/", `<D:propfind xmlns:D="DAV:"><D:allprop/>`, `</D:propfind>`},
+	{"PROPPATCH", "/dav/a.txt", `<D:propertyupdate xmlns:D="DAV:"><D:set><D:prop><Z:p xmlns:Z="urn:z">`, `</Z:p></D:prop></D:set></D:propertyupdate>`},
+	{"LOCK", "/dav/a.txt", `<D:lockinfo xmlns:D="DAV:"><D:lockscope><D:exclusive/></D:lockscope><D:locktype><D:write/></D:locktype><D:owner>`, `</D:owner></D:lockinfo>`},
+}
+
+func TestXMLBody_OverLimitReturns413(t *testing.T) {
+	header := map[string]string{"Depth": "0"}
+	for _, b := range xmlBodies {
+		over := b.head + strings.Repeat(" ", 2<<20) + b.tail
+		for name, body := range map[string]func() io.Reader{
+			"declared": func() io.Reader { return strings.NewReader(over) },
+			"chunked":  func() io.Reader { return io.MultiReader(strings.NewReader(over)) },
+		} {
+			t.Run(b.method+"/"+name, func(t *testing.T) {
+				res := do(t, davfs.New(fixture(), davfs.Options{Prefix: "/dav"}), b.method, b.target, body(), header)
+				if res.code != http.StatusRequestEntityTooLarge {
+					t.Fatalf("status = %d, want 413", res.code)
+				}
+			})
+		}
+		small := b.head + b.tail
+		res := do(t, davfs.New(fixture(), davfs.Options{Prefix: "/dav"}), b.method, b.target, io.MultiReader(strings.NewReader(small)), header)
+		if res.code == http.StatusRequestEntityTooLarge || res.code >= http.StatusInternalServerError {
+			t.Fatalf("%s with a small body: status = %d", b.method, res.code)
+		}
+	}
+}
