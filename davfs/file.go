@@ -96,7 +96,7 @@ func newWriteFile(ctx context.Context, tree Tree, name string, maxSize int64) *w
 	f := &writeFile{ctx: ctx, name: name, maxSize: maxSize, pw: pw, putDone: make(chan error, 1)}
 	go func() {
 		err := tree.Put(ctx, name, pr)
-		pr.CloseWithError(err) //nolint:errcheck // CloseWithError never fails
+		_ = pr.CloseWithError(err) // CloseWithError never fails
 		f.putDone <- err
 	}()
 	return f
@@ -171,7 +171,7 @@ func (f *writeFile) Close() error {
 		record(f.ctx, f.abortErr)
 		return fmt.Errorf("davfs: put %q aborted: %w", f.name, f.abortErr)
 	}
-	f.pw.Close() //nolint:errcheck // Close never fails
+	_ = f.pw.Close() // Close never fails
 	if err := <-f.putDone; err != nil {
 		record(f.ctx, err)
 		return fmt.Errorf("davfs: put %q: %w", f.name, err)
