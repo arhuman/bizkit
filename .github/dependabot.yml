@@ -1,0 +1,21 @@
+# Weekly dependency updates. Place at .github/dependabot.yml.
+# gomod PRs are prefixed `build`, github-actions PRs `ci`, matching Conventional
+# Commits so the commitlint gate passes. For a go.work monorepo, add one gomod
+# entry per module directory.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: build
+      include: scope
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci
