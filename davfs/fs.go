@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"os"
 	"path"
 	"time"
@@ -16,6 +17,9 @@ import (
 
 // errRoot refuses an operation on the mount root itself.
 var errRoot = fmt.Errorf("davfs: the mount root cannot be changed: %w", bizkit.ErrForbidden)
+
+// errCollection refuses a PUT onto an existing directory.
+var errCollection = errors.New("davfs: a collection cannot be replaced by a file")
 
 // fileSystem adapts a Tree to webdav.FileSystem.
 //
@@ -65,10 +69,21 @@ func (f *fileSystem) OpenFile(ctx context.Context, name string, flag int, _ os.F
 }
 
 // openWrite checks the parent is an existing directory, which WebDAV answers
-// 409 otherwise, then starts the streaming Put.
+// 409 otherwise, and that name is not a collection, which RFC 4918 section
+// 9.7.2 answers 405, then starts the streaming Put.
 func (f *fileSystem) openWrite(ctx context.Context, name string) (webdav.File, error) {
 	if name == "/" {
 		return nil, f.fail(ctx, "put", name, errRoot)
+	}
+	e, err := f.tree.Stat(ctx, name)
+	if err != nil && !errors.Is(err, bizkit.ErrNotFound) {
+		return nil, f.fail(ctx, "put", name, err)
+	}
+	if err == nil && e.IsDir {
+		if out, ok := ctx.Value(outcomeKey{}).(*outcome); ok {
+			out.set(http.StatusMethodNotAllowed)
+		}
+		return nil, fmt.Errorf("davfs: put %q: %w", name, errCollection)
 	}
 	if parent := path.Dir(name); parent != "/" {
 		e, err := f.tree.Stat(ctx, parent)

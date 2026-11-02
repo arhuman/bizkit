@@ -240,6 +240,18 @@ func TestPut_InterruptedLeavesNoObject(t *testing.T) {
 	assertSnapshot(t, tree, fixtureSnapshot)
 }
 
+func TestPut_OntoCollectionRefused(t *testing.T) {
+	tree := fixture()
+	h := davfs.New(tree, davfs.Options{Prefix: "/dav"})
+	for _, target := range []string{"/dav/dir", "/dav/dir/"} {
+		res := do(t, h, http.MethodPut, target, strings.NewReader("x"), nil)
+		if res.code != http.StatusMethodNotAllowed {
+			t.Fatalf("PUT %s status = %d, want 405", target, res.code)
+		}
+	}
+	assertSnapshot(t, tree, fixtureSnapshot)
+}
+
 func TestPut_OverMaxFileSizeReturns413(t *testing.T) {
 	for name, length := range map[string]int64{"declared": 6, "chunked": -1} {
 		t.Run(name, func(t *testing.T) {
