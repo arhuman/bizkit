@@ -23,8 +23,8 @@ GOVULNCHECK_VERSION ?= v1.7.0
 
 ## audit: run quality control checks (mod verify, gofmt, file length, lint, vuln scan, coverage gate)
 audit: cover checklen
-	@which golangci-lint > /dev/null || $(MAKE) tools
-	@which govulncheck > /dev/null || $(MAKE) tools
+	@[ "v$$(golangci-lint version --short 2>/dev/null)" = "$(GOLANGCI_VERSION)" ] || $(MAKE) tools
+	@govulncheck -version 2>/dev/null | grep -qF "govulncheck@$(GOVULNCHECK_VERSION)" || $(MAKE) tools
 	go mod verify
 	@unformatted=$$(gofmt -l .); \
 	if [ -n "$$unformatted" ]; then \
