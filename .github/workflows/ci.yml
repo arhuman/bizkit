@@ -38,6 +38,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # make audit runs gitleaks over the whole history, not one commit.
+          fetch-depth: 0
       - uses: actions/setup-go@v7
         with:
           # Not `stable`: the pinned golangci-lint must understand this toolchain.
