@@ -191,37 +191,46 @@ func (s *Store) List(_ context.Context, prefix string) ([]blob.Info, error) {
 		logical += "/"
 		dir = strings.TrimSuffix(logical, "/")
 	}
-	var out []blob.Info
-	err = filepath.WalkDir(filepath.Join(s.root, filepath.FromSlash(dir)), func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				return nil
-			}
-			return err
-		}
-		if d.IsDir() || strings.HasPrefix(d.Name(), tempPrefix) {
-			return nil
-		}
-		rel, err := filepath.Rel(s.root, p)
-		if err != nil {
-			return err
-		}
-		key := filepath.ToSlash(rel)
-		if !strings.HasPrefix(key, logical) {
-			return nil
-		}
-		st, err := d.Info()
-		if err != nil {
-			return err
-		}
-		out = append(out, infoOf(key, st))
-		return nil
-	})
-	if err != nil {
+	l := lister{root: s.root, match: logical}
+	if err := filepath.WalkDir(filepath.Join(s.root, filepath.FromSlash(dir)), l.visit); err != nil {
 		return nil, fmt.Errorf("blob/local: list %q: %w", prefix, err)
 	}
-	slices.SortFunc(out, func(a, b blob.Info) int { return strings.Compare(a.Key, b.Key) })
-	return out, nil
+	slices.SortFunc(l.out, func(a, b blob.Info) int { return strings.Compare(a.Key, b.Key) })
+	return l.out, nil
+}
+
+// lister collects, for List, the objects under root whose logical key starts
+// with match.
+type lister struct {
+	root  string
+	match string
+	out   []blob.Info
+}
+
+func (l *lister) visit(p string, d fs.DirEntry, err error) error {
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if d.IsDir() || strings.HasPrefix(d.Name(), tempPrefix) {
+		return nil
+	}
+	rel, err := filepath.Rel(l.root, p)
+	if err != nil {
+		return err
+	}
+	key := filepath.ToSlash(rel)
+	if !strings.HasPrefix(key, l.match) {
+		return nil
+	}
+	st, err := d.Info()
+	if err != nil {
+		return err
+	}
+	l.out = append(l.out, infoOf(key, st))
+	return nil
 }
 
 func infoOf(key string, st fs.FileInfo) blob.Info {

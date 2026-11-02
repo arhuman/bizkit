@@ -69,7 +69,7 @@ func (h *FeedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	feed, err := h.Resolve(r.Context(), token)
-	if errors.Is(err, bizkit.ErrNotFound) || errors.Is(err, bizkit.ErrExpired) || errors.Is(err, bizkit.ErrForbidden) {
+	if denied(err) {
 		notFound(w)
 		return
 	}
@@ -77,7 +77,11 @@ func (h *FeedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
+	h.serveFeed(w, r, feed)
+}
 
+// serveFeed encodes feed and answers 200, or 304 when If-None-Match matches.
+func (h *FeedHandler) serveFeed(w http.ResponseWriter, r *http.Request, feed Feed) {
 	var body bytes.Buffer
 	if err := Write(&body, feed, h.Options); err != nil {
 		h.fail(w, r, err)
@@ -107,6 +111,11 @@ func (h *FeedHandler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	http.Error(w, "internal error", http.StatusInternalServerError)
+}
+
+// denied reports whether a Resolver error means the token grants nothing.
+func denied(err error) bool {
+	return errors.Is(err, bizkit.ErrNotFound) || errors.Is(err, bizkit.ErrExpired) || errors.Is(err, bizkit.ErrForbidden)
 }
 
 // notFound answers the single 404 shared by unknown, expired and forbidden
