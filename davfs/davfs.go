@@ -208,7 +208,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r2 := r.Clone(context.WithValue(r.Context(), outcomeKey{}, out))
 	r2.URL.Path, r2.URL.RawPath = h.prefix+name, ""
 	if dest != "" {
-		r2.Header.Set("Destination", h.prefix+dest)
+		// x/net/webdav percent-decodes Destination again: hand it the checked name re-escaped.
+		r2.Header.Set("Destination", (&url.URL{Path: h.prefix + dest}).EscapedPath())
 	}
 	if r.Method == "LOCK" {
 		r2.Header.Set("Timeout", capTimeout(r.Header.Get("Timeout"), h.lockTimeout))

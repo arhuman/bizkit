@@ -170,6 +170,49 @@ func TestMove_AuthorizeChecksSourceAndDestination(t *testing.T) {
 	assertSnapshot(t, tree, fixtureSnapshot)
 }
 
+func TestMove_DestinationDecodedOnce(t *testing.T) {
+	for _, method := range []string{"MOVE", "COPY"} {
+		t.Run(method+" percent-encoded dot segment stays literal", func(t *testing.T) {
+			assertEncodedDotSegmentLiteral(t, method)
+		})
+		t.Run(method+" escaped percent keeps its name", func(t *testing.T) {
+			assertEscapedPercentKept(t, method)
+		})
+	}
+}
+
+func assertEncodedDotSegmentLiteral(t *testing.T, method string) {
+	t.Helper()
+	tree := fixture()
+	var seen []string
+	h := davfs.New(tree, davfs.Options{Prefix: "/dav", Authorize: func(_ context.Context, op davfs.Op, name string) error {
+		seen = append(seen, name)
+		if op == davfs.OpWrite && strings.HasPrefix(name, "/secret/") {
+			return fmt.Errorf("no grant: %w", bizkit.ErrForbidden)
+		}
+		return nil
+	}})
+	do(t, h, method, "/dav/a.txt", nil, map[string]string{"Destination": "/dav/dir/%252e%252e/secret/x"})
+	if want := []string{"/a.txt", "/dir/%2e%2e/secret/x"}; !slices.Equal(seen, want) {
+		t.Fatalf("authorize calls = %q, want %q", seen, want)
+	}
+	if _, err := tree.Stat(t.Context(), "/secret/x"); err == nil {
+		t.Fatalf("tree = %q, %s reached /secret/x past Authorize", tree.snapshot(), method)
+	}
+}
+
+func assertEscapedPercentKept(t *testing.T, method string) {
+	t.Helper()
+	tree := fixture()
+	h := davfs.New(tree, davfs.Options{Prefix: "/dav"})
+	if res := do(t, h, method, "/dav/a.txt", nil, map[string]string{"Destination": "/dav/100%2541.txt"}); res.code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", res.code)
+	}
+	if _, err := tree.Stat(t.Context(), "/100%41.txt"); err != nil {
+		t.Fatalf("stat /100%%41.txt: %v (tree = %q)", err, tree.snapshot())
+	}
+}
+
 func TestCopy_DestinationOutsideScopeForbidden(t *testing.T) {
 	for _, dest := range escapingDestinations {
 		t.Run(dest, func(t *testing.T) {
