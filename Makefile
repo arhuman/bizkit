@@ -11,6 +11,7 @@ LINE_LIMIT ?= 500
 # Pinned tool versions: must match the CI workflow and _shared/references/versions.md
 GOLANGCI_VERSION    ?= v2.14.0
 GOVULNCHECK_VERSION ?= v1.7.0
+GITLEAKS_VERSION    ?= v8.30.1
 
 # ==================================================================================== #
 # PHONY DECLARATIONS (in alphabetical order)
@@ -21,10 +22,11 @@ GOVULNCHECK_VERSION ?= v1.7.0
 # STANDARD TARGETS (in alphabetical order)
 # ==================================================================================== #
 
-## audit: run quality control checks (mod verify, gofmt, file length, lint, vuln scan, coverage gate)
+## audit: run quality control checks (mod verify, gofmt, file length, lint, vuln scan, secret scan, coverage gate)
 audit: cover checklen
 	@[ "v$$(golangci-lint version --short 2>/dev/null)" = "$(GOLANGCI_VERSION)" ] || $(MAKE) tools
 	@govulncheck -version 2>/dev/null | grep -qF "govulncheck@$(GOVULNCHECK_VERSION)" || $(MAKE) tools
+	@go version -m "$$(command -v gitleaks)" 2>/dev/null | grep -qE "^[[:space:]]+mod[[:space:]]+github.com/zricethezav/gitleaks/v8[[:space:]]+$(GITLEAKS_VERSION)[[:space:]]" || $(MAKE) tools
 	go mod verify
 	@unformatted=$$(gofmt -l .); \
 	if [ -n "$$unformatted" ]; then \
@@ -32,6 +34,7 @@ audit: cover checklen
 	fi
 	golangci-lint run ./...
 	govulncheck ./...
+	gitleaks git --redact --no-banner .
 
 ## checklen: fail if any non-generated .go file exceeds LINE_LIMIT lines
 checklen:
@@ -91,4 +94,5 @@ tools:
 	@echo "Installing Go tools..."
 	@go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION)
 	@go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
+	@go install github.com/zricethezav/gitleaks/v8@$(GITLEAKS_VERSION)
 	@echo "Tools installed in $(shell go env GOBIN || go env GOPATH)/bin"
