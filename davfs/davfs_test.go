@@ -105,6 +105,24 @@ func TestMove_IntoOwnSubtreeForbidden(t *testing.T) {
 	assertSnapshot(t, tree, fixtureSnapshot)
 }
 
+// An overwriting MOVE or COPY deletes its destination first, so a destination
+// containing the source would take the source with it.
+func TestMoveCopy_OntoAncestorForbidden(t *testing.T) {
+	for _, method := range []string{"MOVE", "COPY"} {
+		for _, dst := range []string{"/dav/dir", "/dav/dir/", "/dav/", "/dav"} {
+			t.Run(method+" "+dst, func(t *testing.T) {
+				tree := fixture()
+				h := davfs.New(tree, davfs.Options{Prefix: "/dav"})
+				res := do(t, h, method, "/dav/dir/in.txt", nil, map[string]string{"Destination": dst, "Overwrite": "T"})
+				if res.code != http.StatusForbidden {
+					t.Errorf("status = %d, want 403", res.code)
+				}
+				assertSnapshot(t, tree, fixtureSnapshot)
+			})
+		}
+	}
+}
+
 func TestMove_MissingOrMalformedDestination(t *testing.T) {
 	h := davfs.New(fixture(), davfs.Options{Prefix: "/dav"})
 	if res := do(t, h, "MOVE", "/dav/a.txt", nil, nil); res.code != http.StatusBadRequest {

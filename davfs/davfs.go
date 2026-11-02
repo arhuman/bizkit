@@ -214,10 +214,20 @@ func (h *handler) destination(r *http.Request, src string) (string, int) {
 		return "", http.StatusForbidden
 	}
 	dst, ok := h.scoped(u.Path)
-	if !ok || dst == src || src == "/" || strings.HasPrefix(dst, src+"/") {
+	if !ok || overlaps(src, dst) {
 		return "", http.StatusForbidden
 	}
 	return dst, 0
+}
+
+// overlaps reports whether one of two clean Tree names is the other or lies
+// under it. An overwriting MOVE or COPY deletes its destination first, so a
+// destination containing the source would destroy it.
+func overlaps(a, b string) bool {
+	if a == "/" || b == "/" || a == b {
+		return true
+	}
+	return strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
 }
 
 func (h *handler) authorizeRequest(ctx context.Context, method, name, dest string) error {

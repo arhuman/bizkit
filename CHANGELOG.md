@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `davfs`: MOVE or COPY onto a folder that contains the source now answers 403. It used to delete that folder, source included, before failing (MOVE) or replace it with the copied file (COPY).
+
 ## [0.2.0] - 2026-11-01
 
 ### Added
