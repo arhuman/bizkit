@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `fileserve`: `SetPolicy(h, name, contentType)` sets the Content-Disposition, nosniff and sandbox Content-Security-Policy headers `Serve` sends, for a handler that writes the response itself.
 - `fileserve`: `Limits.WithDefaults` returns the limits with every zero or negative numeric field set to its Default value, the same limits `NewReader` enforces. `sharelink.UploadCaps.Limits` now uses it.
 
+### Changed
+
+- `blob/local` and `blob/s3` normalize keys with one shared rule (backslashes to slashes, doubled slashes and dot segments collapsed, leading slash dropped), and `blobtest` gains a `KeyNormalization` case that checks the stored key.
+
 ### Fixed
 
 - `blob/local`: `List` and `ListPage` with a prefix that does not end in `/` no longer descend into sibling directories that cannot hold a matching key. Listing `ws1` used to walk all of `ws2`, and an unreadable `ws2` failed the listing.

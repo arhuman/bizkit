@@ -18,6 +18,7 @@ import (
 
 	"github.com/arhuman/bizkit"
 	"github.com/arhuman/bizkit/blob"
+	"github.com/arhuman/bizkit/blob/internal/keys"
 )
 
 const tempPrefix = ".bizkit-tmp-"
@@ -43,14 +44,14 @@ func New(root string) (*Store, error) {
 }
 
 // resolve sanitizes key into an absolute path guaranteed to be under root, and
-// returns the logical key (leading "/" trimmed, traversal collapsed).
+// returns the logical key keys.Clean derives from it.
 func (s *Store) resolve(key string) (full, logical string, err error) {
-	clean := path.Clean("/" + strings.ReplaceAll(key, "\\", "/"))
-	full = filepath.Join(s.root, filepath.FromSlash(clean))
+	logical = keys.Clean(key)
+	full = filepath.Join(s.root, filepath.FromSlash(logical))
 	if full != s.root && !strings.HasPrefix(full, s.root+string(os.PathSeparator)) {
 		return "", "", fmt.Errorf("blob/local: key %q escapes root: %w", key, bizkit.ErrForbidden)
 	}
-	return full, strings.TrimPrefix(clean, "/"), nil
+	return full, logical, nil
 }
 
 // tempFile is the writable side of Put; tests swap createTemp to inject failures.

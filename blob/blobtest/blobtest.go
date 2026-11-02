@@ -38,6 +38,7 @@ func Run(t *testing.T, newBackend Factory) {
 		{"List", testList},
 		{"ListPaged", testListPaged},
 		{"KeyAndPrefix", testKeyAndPrefix},
+		{"KeyNormalization", testKeyNormalization},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -309,4 +310,30 @@ func testKeyAndPrefix(t *testing.T, b blob.Backend) {
 	check(t, err == nil, "Delete of prefix-only key %q err = %v, want nil", "p", err)
 	got := readAll(t, open(t, b, "p/x"))
 	check(t, got == "p/x", "content of %q after Delete(%q) = %q, want %q", "p/x", "p", got, "p/x")
+}
+
+// testKeyNormalization checks every backend stores a key under the same
+// logical name: backslashes become slashes, doubled slashes and dot segments
+// collapse, a leading slash or ".." above the root is dropped.
+func testKeyNormalization(t *testing.T, b blob.Backend) {
+	ctx := context.Background()
+	for _, tc := range []struct{ in, want string }{
+		{`n\a.txt`, "n/a.txt"},
+		{"n//b.txt", "n/b.txt"},
+		{"n/./x/../c.txt", "n/c.txt"},
+		{"/n/d.txt", "n/d.txt"},
+		{"../n/e.txt", "n/e.txt"},
+	} {
+		info := put(t, b, tc.in, tc.want)
+		check(t, info.Key == tc.want, "Put(%q) Key = %q, want %q", tc.in, info.Key, tc.want)
+		st, err := b.Stat(ctx, tc.want)
+		require(t, err == nil, "Stat(%q) after Put(%q): %v", tc.want, tc.in, err)
+		check(t, st.Key == tc.want, "Stat(%q) Key = %q, want %q", tc.want, st.Key, tc.want)
+		got := readAll(t, open(t, b, tc.in))
+		check(t, got == tc.want, "Open(%q) content = %q, want %q", tc.in, got, tc.want)
+	}
+	all, err := b.List(ctx, "n/")
+	require(t, err == nil, "List: %v", err)
+	want := "n/a.txt,n/b.txt,n/c.txt,n/d.txt,n/e.txt"
+	check(t, strings.Join(infoKeys(all), ",") == want, "List(%q) = %v, want %s", "n/", infoKeys(all), want)
 }

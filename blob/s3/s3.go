@@ -1,6 +1,6 @@
 // Package s3 is the blob.Backend for S3 and S3-compatible object stores
 // (MinIO, Garage, AWS S3). Objects live under an optional key prefix in one
-// bucket; keys are sanitized the same way as blob/local, so a key maps to the
+// bucket; keys are normalized by the same rule as blob/local, so a key maps to the
 // same logical name on both backends. The bucket must already exist.
 package s3
 
@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path"
 	"slices"
 	"strings"
 
@@ -18,6 +17,7 @@ import (
 
 	"github.com/arhuman/bizkit"
 	"github.com/arhuman/bizkit/blob"
+	"github.com/arhuman/bizkit/blob/internal/keys"
 )
 
 // partSize bounds the memory one Put buffers: content of unknown length is
@@ -93,16 +93,10 @@ func parseEndpoint(endpoint string) (host string, secure bool) {
 	}
 }
 
-// cleanKey returns the logical key: backslashes become slashes, traversal is
-// collapsed and the leading slash trimmed, matching blob/local.
-func cleanKey(key string) string {
-	return strings.TrimPrefix(path.Clean("/"+strings.ReplaceAll(key, "\\", "/")), "/")
-}
-
 // objectKey returns the bucket key and logical key for key, rejecting a key
 // that cleans to the empty string.
 func (s *Store) objectKey(key string) (full, logical string, err error) {
-	logical = cleanKey(key)
+	logical = keys.Clean(key)
 	if logical == "" {
 		return "", "", fmt.Errorf("blob/s3: empty key: %w", bizkit.ErrForbidden)
 	}
@@ -261,9 +255,9 @@ func (s *Store) ListPage(ctx context.Context, prefix, after string, limit int) (
 }
 
 // listPrefix returns the bucket prefix matching the logical prefix, keeping a
-// trailing slash that cleanKey would drop.
+// trailing slash that keys.Clean would drop.
 func (s *Store) listPrefix(prefix string) string {
-	logical := cleanKey(prefix)
+	logical := keys.Clean(prefix)
 	if strings.HasSuffix(prefix, "/") && logical != "" {
 		logical += "/"
 	}

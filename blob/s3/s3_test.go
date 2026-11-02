@@ -32,21 +32,6 @@ func TestParseEndpoint(t *testing.T) {
 	}
 }
 
-func TestCleanKey(t *testing.T) {
-	for in, want := range map[string]string{
-		"a/b.txt":          "a/b.txt",
-		"/a//b.txt":        "a/b.txt",
-		"../../etc/passwd": "etc/passwd",
-		`dir\file`:         "dir/file",
-		"/":                "",
-		"":                 "",
-	} {
-		if got := cleanKey(in); got != want {
-			t.Errorf("cleanKey(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 func TestNew(t *testing.T) {
 	if _, err := New(Config{}); err == nil {
 		t.Error("New without bucket: want error")
