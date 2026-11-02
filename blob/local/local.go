@@ -226,6 +226,29 @@ func isDir(p string) bool {
 // List returns every object whose logical key starts with prefix, sorted by
 // key. In-flight Put temporaries are never listed.
 func (s *Store) List(_ context.Context, prefix string) ([]blob.Info, error) {
+	return s.list(prefix, "", 0)
+}
+
+// ListPage walks the subtree under prefix once per call, keeping only the
+// limit+1 smallest keys after the cursor and skipping every directory whose
+// keys all sort at or before it.
+func (s *Store) ListPage(_ context.Context, prefix, after string, limit int) ([]blob.Info, string, error) {
+	if limit <= 0 {
+		limit = blob.DefaultPageSize
+	}
+	out, err := s.list(prefix, after, limit+1)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(out) > limit {
+		return out[:limit], out[limit-1].Key, nil
+	}
+	return out, "", nil
+}
+
+// list returns, sorted by key, the objects whose key starts with prefix and
+// is greater than after, at most keep of them when keep is positive.
+func (s *Store) list(prefix, after string, keep int) ([]blob.Info, error) {
 	_, logical, err := s.resolve(prefix)
 	if err != nil {
 		return nil, err
@@ -235,19 +258,21 @@ func (s *Store) List(_ context.Context, prefix string) ([]blob.Info, error) {
 		logical += "/"
 		dir = strings.TrimSuffix(logical, "/")
 	}
-	l := lister{root: s.root, match: logical}
+	l := lister{root: s.root, match: logical, after: after, keep: keep}
 	if err := filepath.WalkDir(filepath.Join(s.root, filepath.FromSlash(dir)), l.visit); err != nil {
 		return nil, fmt.Errorf("blob/local: list %q: %w", prefix, err)
 	}
-	slices.SortFunc(l.out, func(a, b blob.Info) int { return strings.Compare(a.Key, b.Key) })
+	l.trim()
 	return l.out, nil
 }
 
-// lister collects, for List, the objects under root whose logical key starts
-// with match.
+// lister collects the objects under root whose logical key starts with match
+// and is greater than after. A positive keep bounds out to about twice keep.
 type lister struct {
 	root  string
 	match string
+	after string
+	keep  int
 	out   []blob.Info
 }
 
@@ -258,7 +283,7 @@ func (l *lister) visit(p string, d fs.DirEntry, err error) error {
 		}
 		return err
 	}
-	if d.IsDir() || strings.HasPrefix(d.Name(), tempPrefix) {
+	if !d.IsDir() && strings.HasPrefix(d.Name(), tempPrefix) {
 		return nil
 	}
 	rel, err := filepath.Rel(l.root, p)
@@ -266,7 +291,18 @@ func (l *lister) visit(p string, d fs.DirEntry, err error) error {
 		return err
 	}
 	key := filepath.ToSlash(rel)
-	if !strings.HasPrefix(key, l.match) {
+	if d.IsDir() {
+		if key != "." && l.allBeforeCursor(key+"/") {
+			return fs.SkipDir
+		}
+		return nil
+	}
+	return l.add(key, d)
+}
+
+// add records the file d at key when it matches the prefix and the cursor.
+func (l *lister) add(key string, d fs.DirEntry) error {
+	if !strings.HasPrefix(key, l.match) || key <= l.after {
 		return nil
 	}
 	st, err := d.Info()
@@ -274,7 +310,25 @@ func (l *lister) visit(p string, d fs.DirEntry, err error) error {
 		return err
 	}
 	l.out = append(l.out, infoOf(key, st))
+	if l.keep > 0 && len(l.out) >= 2*l.keep {
+		l.trim()
+	}
 	return nil
+}
+
+// allBeforeCursor reports whether every key starting with dir sorts at or
+// before after.
+func (l *lister) allBeforeCursor(dir string) bool {
+	return l.after != "" && dir < l.after && !strings.HasPrefix(l.after, dir)
+}
+
+// trim sorts out by key and, when keep is positive, drops all but the first
+// keep entries.
+func (l *lister) trim() {
+	slices.SortFunc(l.out, func(a, b blob.Info) int { return strings.Compare(a.Key, b.Key) })
+	if l.keep > 0 && len(l.out) > l.keep {
+		l.out = l.out[:l.keep]
+	}
 }
 
 func infoOf(key string, st fs.FileInfo) blob.Info {

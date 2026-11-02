@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `blob`: `Backend.ListPage(ctx, prefix, after, limit)` returns at most `limit` objects with a key greater than `after`, in byte order, and the cursor for the next page (`""` on the last). `limit <= 0` means the new `DefaultPageSize` (1000). `blob/s3` lists from the cursor with `StartAfter`; `blob/local` keeps only about twice `limit` keys in memory while walking. `blobtest` gains a `ListPaged` case. Adding the method breaks any `blob.Backend` implemented outside bizkit (ADR-0001).
 - `fileserve`: `Limits.WithDefaults` returns the limits with every zero or negative numeric field set to its Default value, the same limits `NewReader` enforces. `sharelink.UploadCaps.Limits` now uses it.
 
 ### Fixed

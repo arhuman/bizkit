@@ -3,6 +3,7 @@ package local
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -253,4 +254,61 @@ func TestUnreadableDirectory(t *testing.T) {
 	if _, err := s.List(ctx, ""); !errors.Is(err, fs.ErrPermission) {
 		t.Errorf("List err = %v, want ErrPermission", err)
 	}
+}
+
+// TestListPage_TrimsWhileWalking pages with a limit small enough that the
+// walk trims its candidates several times per page and skips directories
+// before the cursor. The walk visits "w/dN/" before "w/dN-a", which sorts
+// first, so a trim that truncates before sorting loses keys.
+func TestListPage_TrimsWhileWalking(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	var keys []string
+	for d := range 4 {
+		keys = append(keys, fmt.Sprintf("w/d%d-a", d))
+		for f := range 5 {
+			keys = append(keys, fmt.Sprintf("w/d%d/f%d", d, f))
+		}
+	}
+	for _, key := range keys {
+		if _, err := s.Put(ctx, key, strings.NewReader(key), blob.PutOptions{}); err != nil {
+			t.Fatalf("Put(%q): %v", key, err)
+		}
+	}
+	all, err := s.List(ctx, "w/")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	paged := pageAll(t, s, "w/", 2, len(all))
+	if strings.Join(paged, ",") != strings.Join(infoKeys(all), ",") {
+		t.Errorf("paged keys = %v, want %v", paged, infoKeys(all))
+	}
+}
+
+// pageAll follows the ListPage cursor for at most maxPages calls and returns
+// every key it saw.
+func pageAll(t *testing.T, s *Store, prefix string, limit, maxPages int) []string {
+	t.Helper()
+	var keys []string
+	after := ""
+	for range maxPages {
+		page, next, err := s.ListPage(context.Background(), prefix, after, limit)
+		if err != nil {
+			t.Fatalf("ListPage(after %q): %v", after, err)
+		}
+		keys = append(keys, infoKeys(page)...)
+		if next == "" {
+			break
+		}
+		after = next
+	}
+	return keys
+}
+
+func infoKeys(infos []blob.Info) []string {
+	keys := make([]string, 0, len(infos))
+	for _, info := range infos {
+		keys = append(keys, info.Key)
+	}
+	return keys
 }

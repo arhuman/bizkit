@@ -222,12 +222,8 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 // List returns every object whose logical key starts with prefix, sorted by
 // key. Listings do not carry ContentType, so it is empty on every result.
 func (s *Store) List(ctx context.Context, prefix string) ([]blob.Info, error) {
-	logical := cleanKey(prefix)
-	if strings.HasSuffix(prefix, "/") && logical != "" {
-		logical += "/"
-	}
 	var out []blob.Info
-	for o := range s.client.ListObjects(ctx, s.bucket, minio.ListObjectsOptions{Prefix: s.prefix + logical, Recursive: true}) {
+	for o := range s.client.ListObjects(ctx, s.bucket, minio.ListObjectsOptions{Prefix: s.listPrefix(prefix), Recursive: true}) {
 		if o.Err != nil {
 			return nil, wrapErr("list", prefix, o.Err)
 		}
@@ -235,6 +231,43 @@ func (s *Store) List(ctx context.Context, prefix string) ([]blob.Info, error) {
 	}
 	slices.SortFunc(out, func(a, b blob.Info) int { return strings.Compare(a.Key, b.Key) })
 	return out, nil
+}
+
+// ListPage lists from the cursor with StartAfter and stops reading after
+// limit+1 objects, relying on the store's byte order of keys.
+func (s *Store) ListPage(ctx context.Context, prefix, after string, limit int) ([]blob.Info, string, error) {
+	if limit <= 0 {
+		limit = blob.DefaultPageSize
+	}
+	opts := minio.ListObjectsOptions{Prefix: s.listPrefix(prefix), Recursive: true, MaxKeys: min(limit+1, blob.DefaultPageSize)}
+	if after != "" {
+		opts.StartAfter = s.prefix + after
+	}
+	// Cancelling stops the listing goroutine, which blocks on its next send
+	// once this loop stops reading.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	out := make([]blob.Info, 0, min(limit+1, blob.DefaultPageSize))
+	for o := range s.client.ListObjects(ctx, s.bucket, opts) {
+		if o.Err != nil {
+			return nil, "", wrapErr("list", prefix, o.Err)
+		}
+		if len(out) == limit {
+			return out, out[limit-1].Key, nil
+		}
+		out = append(out, infoOf(strings.TrimPrefix(o.Key, s.prefix), o))
+	}
+	return out, "", nil
+}
+
+// listPrefix returns the bucket prefix matching the logical prefix, keeping a
+// trailing slash that cleanKey would drop.
+func (s *Store) listPrefix(prefix string) string {
+	logical := cleanKey(prefix)
+	if strings.HasSuffix(prefix, "/") && logical != "" {
+		logical += "/"
+	}
+	return s.prefix + logical
 }
 
 func infoOf(logical string, o minio.ObjectInfo) blob.Info {

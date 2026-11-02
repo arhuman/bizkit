@@ -36,6 +36,7 @@ func Run(t *testing.T, newBackend Factory) {
 		{"MaxSize", testMaxSize},
 		{"Overwrite", testOverwrite},
 		{"List", testList},
+		{"ListPaged", testListPaged},
 		{"KeyAndPrefix", testKeyAndPrefix},
 	}
 	for _, c := range cases {
@@ -221,6 +222,61 @@ func testList(t *testing.T, b blob.Backend) {
 		}
 		check(t, strings.Join(keys, ",") == strings.Join(tc.want, ","), "List(%q) = %v, want %v", tc.prefix, keys, tc.want)
 	}
+}
+
+// testListPaged pages through a prefix and checks the pages join into List's
+// result. The keys "p/a-b", "p/a/x" and "p/a0" sort in byte order, which a
+// directory walk does not visit in.
+func testListPaged(t *testing.T, b blob.Backend) {
+	keys := []string{"p/a/y", "p/b", "p/a0", "p/a-b", "q/z", "p/a/x"}
+	for _, k := range keys {
+		put(t, b, k, k)
+	}
+	ctx := context.Background()
+	all, err := b.List(ctx, "p/")
+	require(t, err == nil, "List: %v", err)
+	check(t, strings.Join(infoKeys(all), ",") == "p/a-b,p/a/x,p/a/y,p/a0,p/b",
+		"List(%q) = %v, want byte order", "p/", infoKeys(all))
+
+	for _, tc := range []struct {
+		prefix, after string
+		limit         int
+		want          []string
+	}{
+		{"p/", "", 2, []string{"p/a-b,p/a/x", "p/a/y,p/a0", "p/b"}},
+		{"p/", "", 5, []string{"p/a-b,p/a/x,p/a/y,p/a0,p/b"}},
+		{"p/", "", 0, []string{"p/a-b,p/a/x,p/a/y,p/a0,p/b"}},
+		{"p/a", "", 3, []string{"p/a-b,p/a/x,p/a/y", "p/a0"}},
+		{"p/", "p/a/", 2, []string{"p/a/x,p/a/y", "p/a0,p/b"}},
+		{"p/", "p/a/y", 10, []string{"p/a0,p/b"}},
+		{"p/", "p/b", 1, []string{""}},
+		{"", "p/b", 0, []string{"q/z"}},
+	} {
+		after := tc.after
+		var pages []string
+		for range len(keys) + 1 {
+			page, next, err := b.ListPage(ctx, tc.prefix, after, tc.limit)
+			require(t, err == nil, "ListPage(%q, %q, %d): %v", tc.prefix, after, tc.limit, err)
+			got := infoKeys(page)
+			pages = append(pages, strings.Join(got, ","))
+			if next == "" {
+				break
+			}
+			check(t, len(got) > 0 && next == got[len(got)-1],
+				"ListPage(%q, %q, %d) cursor = %q, want the last key of %v", tc.prefix, after, tc.limit, next, got)
+			after = next
+		}
+		check(t, strings.Join(pages, "|") == strings.Join(tc.want, "|"),
+			"ListPage(%q, after %q, limit %d) pages = %q, want %q", tc.prefix, tc.after, tc.limit, pages, tc.want)
+	}
+}
+
+func infoKeys(infos []blob.Info) []string {
+	keys := make([]string, 0, len(infos))
+	for _, info := range infos {
+		keys = append(keys, info.Key)
+	}
+	return keys
 }
 
 // testKeyAndPrefix covers a key that is also a prefix of another key. The
