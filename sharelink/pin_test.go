@@ -27,7 +27,7 @@ func TestPIN_LocksAfterFiveFailures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	locked := PINState{LockedUntil: t0.Add(15 * time.Minute)}
+	locked := PINState{Lockouts: 1, LockedUntil: t0.Add(15 * time.Minute)}
 	type step struct {
 		name      string
 		at        time.Duration
@@ -82,6 +82,33 @@ func TestPIN_LockExpiryGivesFreshCount(t *testing.T) {
 	}
 	if !errors.Is(err, bizkit.ErrForbidden) {
 		t.Fatalf("ErrWrongPIN must wrap ErrForbidden: %v", err)
+	}
+}
+
+func TestCheckPIN_LockGrowsAcrossWindows(t *testing.T) {
+	wrong := func() bool { return false }
+	want := []time.Duration{
+		15 * time.Minute, 30 * time.Minute, time.Hour, 2 * time.Hour, 4 * time.Hour,
+		8 * time.Hour, 16 * time.Hour, 24 * time.Hour, 24 * time.Hour,
+	}
+	var st PINState
+	now := t0
+	for i, d := range want {
+		var err error
+		for range MaxPINFailures {
+			st, err = CheckPIN(st, now, wrong)
+		}
+		if !errors.Is(err, bizkit.ErrLocked) {
+			t.Fatalf("window %d: err = %v, want ErrLocked", i, err)
+		}
+		if got := st.LockedUntil.Sub(now); got != d {
+			t.Fatalf("window %d: lock lasts %v, want %v", i, got, d)
+		}
+		now = st.LockedUntil
+	}
+	st, err := CheckPIN(st, now, func() bool { return true })
+	if err != nil || st != (PINState{}) {
+		t.Fatalf("right PIN: err = %v state = %+v, want zero state", err, st)
 	}
 }
 

@@ -18,9 +18,11 @@ const (
 	// MinPINLen and MaxPINLen bound a PIN, in characters.
 	MinPINLen = 4
 	MaxPINLen = 32
-	// MaxPINFailures consecutive wrong PINs lock a link for PINLockDuration.
-	MaxPINFailures  = 5
-	PINLockDuration = 15 * time.Minute
+	// MaxPINFailures consecutive wrong PINs lock a link. The first lock lasts
+	// PINLockDuration, each later one twice the previous, up to MaxPINLockDuration.
+	MaxPINFailures     = 5
+	PINLockDuration    = 15 * time.Minute
+	MaxPINLockDuration = 24 * time.Hour
 	// MinPINKeyLen is the minimum length of a PINHasher key, in bytes.
 	MinPINKeyLen = 32
 )
@@ -98,10 +100,13 @@ func (h *PINHasher) mac(salt []byte, pin string) []byte {
 }
 
 // PINState is the lockout state of one link, persisted by the host beside
-// the PIN hash: the count of consecutive wrong PINs and the end of the
-// current lock, zero when never locked.
+// the PIN hash: the count of consecutive wrong PINs, the count of locks since
+// the last right PIN, and the end of the current lock, zero when never locked.
+// The host must persist every field: dropping Lockouts resets the lock
+// duration to PINLockDuration.
 type PINState struct {
 	Failures    int
+	Lockouts    int
 	LockedUntil time.Time
 }
 
@@ -118,12 +123,15 @@ func (st PINState) Locked(now time.Time) bool {
 //     called and the state is unchanged.
 //   - A match resets the state to zero and returns nil.
 //   - A mismatch counts one failure and returns ErrWrongPIN; the
-//     MaxPINFailures-th consecutive one instead sets LockedUntil to
-//     now+PINLockDuration, resets Failures to 0 and returns ErrLocked.
+//     MaxPINFailures-th consecutive one instead locks the link, resets
+//     Failures to 0, counts one more Lockouts and returns ErrLocked.
+//     LockedUntil is now plus PINLockDuration doubled once per earlier
+//     lockout, capped at MaxPINLockDuration.
 //
 // Once the lock window has passed, attempts are judged again with a fresh
-// count, so another MaxPINFailures wrong PINs are needed to lock again.
-// Failures never decay with time otherwise. verify is the host's comparison
+// count, so another MaxPINFailures wrong PINs are needed to lock again, for
+// twice as long. Only a right PIN resets Lockouts; neither count decays with
+// time. verify is the host's comparison
 // of the attempt against the stored hash; it must be constant-time. The host
 // must load and save the state atomically (a row lock), or concurrent
 // attempts can each see fewer failures than were made.
@@ -138,6 +146,18 @@ func CheckPIN(st PINState, now time.Time, verify func() bool) (PINState, error) 
 	if st.Failures < MaxPINFailures {
 		return st, ErrWrongPIN
 	}
-	locked := PINState{LockedUntil: now.Add(PINLockDuration)}
+	locked := PINState{Lockouts: st.Lockouts + 1, LockedUntil: now.Add(lockDuration(st.Lockouts))}
 	return locked, fmt.Errorf("sharelink: %d wrong PINs: %w", MaxPINFailures, bizkit.ErrLocked)
+}
+
+// lockDuration is the length of a lock preceded by prior lockouts.
+func lockDuration(prior int) time.Duration {
+	d := PINLockDuration
+	for range prior {
+		if d >= MaxPINLockDuration/2 {
+			return MaxPINLockDuration
+		}
+		d *= 2
+	}
+	return d
 }
