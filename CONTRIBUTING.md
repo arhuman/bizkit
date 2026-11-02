@@ -4,10 +4,11 @@ How to build, test, and submit changes. Keep it short and true; delete sections 
 
 ## Setup
 
-```bash
-# clone, then bring up dependencies (DB, etc.)
-TODO
-```
+- Go 1.26.10 or newer (the `go` directive in `go.mod`; CI also tests the latest stable release).
+- `golangci-lint` and `govulncheck` at the versions pinned in the `Makefile`: `make tools` installs
+  them, and `make audit` runs it when they are missing or at another version.
+- Docker with Compose v2, for `make test-s3` only. No other service is needed: the library owns no
+  database, and every other test runs in-process.
 
 ## Make targets
 
@@ -32,4 +33,4 @@ and in CI (commitlint on PRs).
 
 1. `make ci` passes.
 2. Update `CHANGELOG.md` under `[Unreleased]`.
-3. TODO: project-specific checks (e.g. verify UI flows in a browser).
+3. If the change touches `blob/s3`, `make test-s3` passes (CI runs it on every PR).
