@@ -386,15 +386,47 @@ type outcomeKey struct{}
 // ErrForbidden or ErrTooLarge, or an XML body over maxXMLBody, calls for. x/net/webdav picks its own status for
 // a failed FileSystem call (405 for any failed PUT, for instance), so
 // statusWriter replaces it with this one.
+//
+// It also caches the entries the request has already statted or listed, by
+// name: a PROPFIND stats every entry it reports three or four times. Any
+// change to the Tree drops the cache.
 type outcome struct {
-	mu     sync.Mutex
-	status int
+	mu      sync.Mutex
+	status  int
+	entries map[string]Entry
+}
+
+func outcomeOf(ctx context.Context) *outcome {
+	out, _ := ctx.Value(outcomeKey{}).(*outcome)
+	return out
+}
+
+func (o *outcome) entry(name string) (Entry, bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	e, ok := o.entries[name]
+	return e, ok
+}
+
+func (o *outcome) remember(name string, e Entry) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.entries == nil {
+		o.entries = map[string]Entry{}
+	}
+	o.entries[name] = e
+}
+
+func (o *outcome) forget() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.entries = nil
 }
 
 // record notes the status err maps to, keeping the first one.
 func record(ctx context.Context, err error) {
-	out, ok := ctx.Value(outcomeKey{}).(*outcome)
-	if !ok {
+	out := outcomeOf(ctx)
+	if out == nil {
 		return
 	}
 	status := 0

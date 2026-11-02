@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"path"
 	"slices"
 	"strings"
@@ -27,6 +28,7 @@ type memTree struct {
 	calls int
 	lists int
 	opens int
+	stats map[string]int
 }
 
 type memNode struct {
@@ -39,7 +41,7 @@ var epoch = time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
 // newMemTree builds a tree from paths; a trailing slash marks a directory,
 // anything else is a file holding its own value.
 func newMemTree(files map[string]string) *memTree {
-	t := &memTree{nodes: map[string]*memNode{}, deny: map[string]bool{}}
+	t := &memTree{nodes: map[string]*memNode{}, deny: map[string]bool{}, stats: map[string]int{}}
 	for p, content := range files {
 		if strings.HasSuffix(p, "/") {
 			t.nodes[strings.TrimSuffix(p, "/")] = &memNode{dir: true}
@@ -70,6 +72,7 @@ func (t *memTree) parentExists(name string) bool {
 func (t *memTree) Stat(_ context.Context, name string) (davfs.Entry, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.stats[name]++
 	if err := t.check(name); err != nil {
 		return davfs.Entry{}, err
 	}
@@ -218,4 +221,11 @@ func (t *memTree) listOpenCounts() (lists, opens int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.lists, t.opens
+}
+
+// statCounts reports how many times Stat was called, per name.
+func (t *memTree) statCounts() map[string]int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return maps.Clone(t.stats)
 }

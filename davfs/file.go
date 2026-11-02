@@ -103,6 +103,11 @@ func (f *dirFile) list() error {
 	if err != nil {
 		return f.fs.fail(f.ctx, "open", f.name, err)
 	}
+	if out := outcomeOf(f.ctx); out != nil {
+		for _, e := range entries {
+			out.remember(path.Join(f.name, e.Name), e)
+		}
+	}
 	f.entries, f.listed = entries, true
 	return nil
 }

@@ -479,6 +479,31 @@ func TestPropfind_ListingOpensNoContent(t *testing.T) {
 	}
 }
 
+func TestPropfind_StatsAtMostOncePerEntry(t *testing.T) {
+	tree := newMemTree(map[string]string{
+		"/d/":       "",
+		"/d/a.txt":  "a",
+		"/d/b.txt":  "bb",
+		"/d/c.txt":  "ccc",
+		"/d/sub/":   "",
+		"/d/sub/x":  "x",
+		"/other.md": "o",
+	})
+	h := davfs.New(tree, davfs.Options{Prefix: "/dav"})
+	res := do(t, h, "PROPFIND", "/dav/d/", nil, map[string]string{"Depth": "1"})
+	if res.code != http.StatusMultiStatus {
+		t.Fatalf("status = %d, want 207", res.code)
+	}
+	if !strings.Contains(res.body, "<D:getcontentlength>3</D:getcontentlength>") {
+		t.Fatalf("body lacks c.txt's length: %s", res.body)
+	}
+	for name, n := range tree.statCounts() {
+		if n > 1 {
+			t.Errorf("Depth 1 PROPFIND made %d Stat of %s, want at most 1", n, name)
+		}
+	}
+}
+
 // xmlBodies wrap padding in a well-formed PROPFIND, PROPPATCH or LOCK body,
 // so only its size can make the request fail.
 var xmlBodies = []struct {

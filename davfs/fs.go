@@ -43,6 +43,7 @@ func (f *fileSystem) Mkdir(ctx context.Context, name string, _ os.FileMode) erro
 	if name == "/" {
 		return fmt.Errorf("davfs: mkdir %q: %w", name, os.ErrExist)
 	}
+	f.changed(ctx)
 	if err := f.tree.Mkdir(ctx, name); err != nil {
 		return f.fail(ctx, "mkdir", name, err)
 	}
@@ -56,7 +57,7 @@ func (f *fileSystem) OpenFile(ctx context.Context, name string, flag int, _ os.F
 	}
 	entry := rootEntry
 	if name != "/" {
-		e, err := f.tree.Stat(ctx, name)
+		e, err := f.stat(ctx, name)
 		if err != nil {
 			return nil, f.fail(ctx, "open", name, err)
 		}
@@ -75,12 +76,13 @@ func (f *fileSystem) openWrite(ctx context.Context, name string) (webdav.File, e
 	if name == "/" {
 		return nil, f.fail(ctx, "put", name, errRoot)
 	}
+	f.changed(ctx)
 	e, err := f.tree.Stat(ctx, name)
 	if err != nil && !errors.Is(err, bizkit.ErrNotFound) {
 		return nil, f.fail(ctx, "put", name, err)
 	}
 	if err == nil && e.IsDir {
-		if out, ok := ctx.Value(outcomeKey{}).(*outcome); ok {
+		if out := outcomeOf(ctx); out != nil {
 			out.set(http.StatusMethodNotAllowed)
 		}
 		return nil, fmt.Errorf("davfs: put %q: %w", name, errCollection)
@@ -102,6 +104,7 @@ func (f *fileSystem) RemoveAll(ctx context.Context, name string) error {
 	if name == "/" {
 		return f.fail(ctx, "remove", name, errRoot)
 	}
+	f.changed(ctx)
 	if err := f.tree.Remove(ctx, name); err != nil {
 		return f.fail(ctx, "remove", name, err)
 	}
@@ -113,6 +116,7 @@ func (f *fileSystem) Rename(ctx context.Context, oldName, newName string) error 
 	if oldName == "/" || newName == "/" {
 		return f.fail(ctx, "rename", oldName, errRoot)
 	}
+	f.changed(ctx)
 	if err := f.tree.Rename(ctx, oldName, newName); err != nil {
 		return f.fail(ctx, "rename", oldName, err)
 	}
@@ -124,11 +128,34 @@ func (f *fileSystem) Stat(ctx context.Context, name string) (os.FileInfo, error)
 	if name == "/" {
 		return fileInfo{rootEntry}, nil
 	}
-	e, err := f.tree.Stat(ctx, name)
+	e, err := f.stat(ctx, name)
 	if err != nil {
 		return nil, f.fail(ctx, "stat", name, err)
 	}
 	return fileInfo{e}, nil
+}
+
+// stat serves name from the request's cache, filled by earlier Stat and List
+// calls, before asking the Tree. Errors are never cached.
+func (f *fileSystem) stat(ctx context.Context, name string) (Entry, error) {
+	out := outcomeOf(ctx)
+	if out != nil {
+		if e, ok := out.entry(name); ok {
+			return e, nil
+		}
+	}
+	e, err := f.tree.Stat(ctx, name)
+	if err == nil && out != nil {
+		out.remember(name, e)
+	}
+	return e, err
+}
+
+// changed drops the request's cache before the Tree is modified.
+func (f *fileSystem) changed(ctx context.Context) {
+	if out := outcomeOf(ctx); out != nil {
+		out.forget()
+	}
 }
 
 var rootEntry = Entry{Name: "/", IsDir: true}
