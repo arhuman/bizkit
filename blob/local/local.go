@@ -65,13 +65,15 @@ var createTemp = func(dir string) (tempFile, error) {
 
 // Put writes r to a temporary file beside key and renames it into place, so a
 // failed or oversized write never replaces or truncates an existing object.
+// The empty key, and a key with any segment starting with ".bizkit-tmp-", fail
+// with bizkit.ErrForbidden.
 func (s *Store) Put(ctx context.Context, key string, r io.Reader, opts blob.PutOptions) (blob.Info, error) {
 	full, logical, err := s.resolve(key)
 	if err != nil {
 		return blob.Info{}, err
 	}
-	if logical == "" {
-		return blob.Info{}, fmt.Errorf("blob/local: empty key: %w", bizkit.ErrForbidden)
+	if err := checkPutKey(logical); err != nil {
+		return blob.Info{}, err
 	}
 	if err := os.MkdirAll(filepath.Dir(full), 0o750); err != nil {
 		return blob.Info{}, fmt.Errorf("blob/local: mkdir for %q: %w", key, err)
@@ -101,6 +103,21 @@ func (s *Store) Put(ctx context.Context, key string, r io.Reader, opts blob.PutO
 	}
 	info.ContentType = opts.ContentType
 	return info, nil
+}
+
+// checkPutKey refuses the empty key and any key with a segment starting with
+// tempPrefix: List skips those names as in-flight temporaries, so such an
+// object would be stored yet never listed.
+func checkPutKey(logical string) error {
+	if logical == "" {
+		return fmt.Errorf("blob/local: empty key: %w", bizkit.ErrForbidden)
+	}
+	for seg := range strings.SplitSeq(logical, "/") {
+		if strings.HasPrefix(seg, tempPrefix) {
+			return fmt.Errorf("blob/local: key %q uses the reserved prefix %q: %w", logical, tempPrefix, bizkit.ErrForbidden)
+		}
+	}
+	return nil
 }
 
 func writeLimited(w io.Writer, r io.Reader, maxSize int64) error {

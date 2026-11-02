@@ -63,6 +63,19 @@ func TestEmptyKeyForbidden(t *testing.T) {
 	}
 }
 
+func TestPut_ReservedTempPrefixForbidden(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	for _, key := range []string{tempPrefix + "x", "a/" + tempPrefix + "x", "a/" + tempPrefix + "d/b"} {
+		if _, err := s.Put(ctx, key, strings.NewReader("x"), blob.PutOptions{}); !errors.Is(err, bizkit.ErrForbidden) {
+			t.Errorf("Put(%q) err = %v, want ErrForbidden", key, err)
+		}
+		if _, err := s.Stat(ctx, key); !errors.Is(err, bizkit.ErrNotFound) {
+			t.Errorf("Stat(%q) err = %v, want ErrNotFound", key, err)
+		}
+	}
+}
+
 func TestPrefixIsNotAnObject(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()

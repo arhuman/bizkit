@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `blob/local`: `Put` now refuses a key with a segment starting with `.bizkit-tmp-` with `ErrForbidden`. It used to store the object, which `Stat` and `Open` found but `List` never returned.
 - `davfs`: a PROPFIND, PROPPATCH or LOCK body over 1 MiB now answers 413, whether its length is declared or streamed. It used to be decoded whole, whatever its size.
 - `davfs`: a Depth 1 PROPFIND no longer opens file contents or lists subdirectories; the Tree reader opens on the first read and a directory lists on the first Readdir. It used to call `Tree.Open` on every listed file, a GET per file on `blob/s3`.
 - `davfs`: PROPFIND with `Depth: infinity`, or with no Depth header, now answers 403 with the `propfind-finite-depth` precondition. It used to walk every object under the mount in one request.
