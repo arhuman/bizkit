@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"mime"
 	"net/http"
 	"os"
 	"path"
@@ -160,7 +161,7 @@ func (f *fileSystem) changed(ctx context.Context) {
 
 var rootEntry = Entry{Name: "/", IsDir: true}
 
-// fileInfo adapts an Entry to fs.FileInfo.
+// fileInfo adapts an Entry to fs.FileInfo and webdav.ContentTyper.
 type fileInfo struct {
 	entry Entry
 }
@@ -176,4 +177,14 @@ func (fi fileInfo) Mode() fs.FileMode {
 		return fs.ModeDir | 0o755
 	}
 	return 0o644
+}
+
+// ContentType returns the media type of the name's extension, else
+// application/octet-stream. It never sniffs content: x/net/webdav would open
+// the file to do so, a Tree.Open per extensionless file in a listing.
+func (fi fileInfo) ContentType(context.Context) (string, error) {
+	if t := mime.TypeByExtension(path.Ext(fi.entry.Name)); t != "" {
+		return t, nil
+	}
+	return "application/octet-stream", nil
 }

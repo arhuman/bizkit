@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `davfs`: a PROPFIND no longer opens a file without an extension to sniff its type. `getcontenttype`, and the Content-Type of a GET, come from the name's extension, else `application/octet-stream`. A Depth 1 PROPFIND used to call `Tree.Open` on every extensionless file it listed.
 - `davfs`: a PROPFIND now calls `Tree.Stat` at most once per entry; the children of a listed folder come from its `Tree.List` result. A Depth 1 PROPFIND used to stat each entry three or four times.
 - `davfs`: a PUT onto an existing folder now answers 405 and leaves the folder in place. It used to replace the folder with a file, orphaning its contents.
 - `davfs`: LOCK on the mount root now answers 403, and every lock timeout, `Infinite` or absent included, is capped by the new `Options.LockTimeout` (zero means one hour). A single root lock used to block every PUT, DELETE and LOCK from other clients until the process restarted.

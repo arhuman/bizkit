@@ -479,6 +479,32 @@ func TestPropfind_ListingOpensNoContent(t *testing.T) {
 	}
 }
 
+func TestPropfind_ExtensionlessFileNotOpened(t *testing.T) {
+	tree := newMemTree(map[string]string{
+		"/d/":         "",
+		"/d/README":   "plain text",
+		"/d/Makefile": "all:",
+		"/d/blob":     "\x00\x01",
+		"/d/a.txt":    "a",
+	})
+	h := davfs.New(tree, davfs.Options{Prefix: "/dav"})
+	res := do(t, h, "PROPFIND", "/dav/d/", nil, map[string]string{"Depth": "1"})
+	if res.code != http.StatusMultiStatus {
+		t.Fatalf("status = %d, want 207", res.code)
+	}
+	if _, opens := tree.listOpenCounts(); opens != 0 {
+		t.Fatalf("Depth 1 PROPFIND made %d Open, want 0", opens)
+	}
+	for _, want := range []string{
+		"<D:getcontenttype>application/octet-stream</D:getcontenttype>",
+		"<D:getcontenttype>text/plain; charset=utf-8</D:getcontenttype>",
+	} {
+		if !strings.Contains(res.body, want) {
+			t.Fatalf("body lacks %s:\n%s", want, res.body)
+		}
+	}
+}
+
 func TestPropfind_StatsAtMostOncePerEntry(t *testing.T) {
 	tree := newMemTree(map[string]string{
 		"/d/":       "",
