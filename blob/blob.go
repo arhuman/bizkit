@@ -47,6 +47,11 @@ type Object interface {
 // Errors for a key that does not exist wrap bizkit.ErrNotFound; errors for a
 // MaxSize overrun wrap bizkit.ErrTooLarge. Callers match them with errors.Is.
 // Implementations must be safe for concurrent use.
+//
+// A key may also be a directory prefix of other keys ("a" and "a/x"). A
+// backend may store both, or refuse with an error wrapping bizkit.ErrForbidden
+// the Put of "a" while "a/x" is stored, and of "a/x" while "a" is stored; each
+// backend documents which. Either way the stored object is untouched.
 type Backend interface {
 	// Put stores the content of r under key, replacing any existing object.
 	// A Put that fails, including a MaxSize overrun, leaves no partial object
@@ -57,7 +62,9 @@ type Backend interface {
 	Open(ctx context.Context, key string) (Object, error)
 	// Stat returns the metadata of the object at key.
 	Stat(ctx context.Context, key string) (Info, error)
-	// Delete removes the object at key. Deleting a missing key is not an error.
+	// Delete removes the object at key. Deleting a missing key, including a
+	// key that is only a prefix of stored keys, is not an error and removes
+	// nothing.
 	Delete(ctx context.Context, key string) error
 	// List returns every object whose key starts with prefix, sorted by key.
 	// The match is on the key string, not on directory boundaries: prefix

@@ -65,8 +65,9 @@ var createTemp = func(dir string) (tempFile, error) {
 
 // Put writes r to a temporary file beside key and renames it into place, so a
 // failed or oversized write never replaces or truncates an existing object.
-// The empty key, and a key with any segment starting with ".bizkit-tmp-", fail
-// with bizkit.ErrForbidden.
+// The empty key, a key with any segment starting with ".bizkit-tmp-", a key
+// that is a directory prefix of stored keys ("a" while "a/x" exists) and a key
+// under a stored key ("a/x" while "a" exists) fail with bizkit.ErrForbidden.
 func (s *Store) Put(ctx context.Context, key string, r io.Reader, opts blob.PutOptions) (blob.Info, error) {
 	full, logical, err := s.resolve(key)
 	if err != nil {
@@ -76,26 +77,13 @@ func (s *Store) Put(ctx context.Context, key string, r io.Reader, opts blob.PutO
 		return blob.Info{}, err
 	}
 	if err := os.MkdirAll(filepath.Dir(full), 0o750); err != nil {
+		if errors.Is(err, syscall.ENOTDIR) {
+			return blob.Info{}, fmt.Errorf("blob/local: key %q is under an existing object: %w", key, bizkit.ErrForbidden)
+		}
 		return blob.Info{}, fmt.Errorf("blob/local: mkdir for %q: %w", key, err)
 	}
-	f, err := createTemp(filepath.Dir(full))
-	if err != nil {
-		return blob.Info{}, fmt.Errorf("blob/local: create %q: %w", key, err)
-	}
-	tmp := f.Name()
-	if err := writeLimited(f, r, opts.MaxSize); err != nil {
-		_ = f.Close()
-		_ = os.Remove(tmp)
-		return blob.Info{}, fmt.Errorf("blob/local: write %q: %w", key, err)
-	}
-	// A failed Close can mean unflushed bytes: the Put must not report success.
-	if err := f.Close(); err != nil {
-		_ = os.Remove(tmp)
-		return blob.Info{}, fmt.Errorf("blob/local: close %q: %w", key, err)
-	}
-	if err := os.Rename(tmp, full); err != nil {
-		_ = os.Remove(tmp)
-		return blob.Info{}, fmt.Errorf("blob/local: commit %q: %w", key, err)
+	if err := writeFile(full, key, r, opts.MaxSize); err != nil {
+		return blob.Info{}, err
 	}
 	info, err := s.Stat(ctx, logical)
 	if err != nil {
@@ -103,6 +91,34 @@ func (s *Store) Put(ctx context.Context, key string, r io.Reader, opts blob.PutO
 	}
 	info.ContentType = opts.ContentType
 	return info, nil
+}
+
+// writeFile writes r to a temporary file beside full and renames it onto full.
+// On failure it removes the temporary and leaves full untouched.
+func writeFile(full, key string, r io.Reader, maxSize int64) error {
+	f, err := createTemp(filepath.Dir(full))
+	if err != nil {
+		return fmt.Errorf("blob/local: create %q: %w", key, err)
+	}
+	tmp := f.Name()
+	if err := writeLimited(f, r, maxSize); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return fmt.Errorf("blob/local: write %q: %w", key, err)
+	}
+	// A failed Close can mean unflushed bytes: the Put must not report success.
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("blob/local: close %q: %w", key, err)
+	}
+	if err := os.Rename(tmp, full); err != nil {
+		_ = os.Remove(tmp)
+		if isDir(full) {
+			return fmt.Errorf("blob/local: key %q is a prefix of other keys: %w", key, bizkit.ErrForbidden)
+		}
+		return fmt.Errorf("blob/local: commit %q: %w", key, err)
+	}
+	return nil
 }
 
 // checkPutKey refuses the empty key and any key with a segment starting with
@@ -180,8 +196,9 @@ func (s *Store) Stat(_ context.Context, key string) (blob.Info, error) {
 	return infoOf(logical, st), nil
 }
 
-// Delete removes the object at key; a missing key is not an error. Empty
-// parent directories are left in place.
+// Delete removes the object at key; a missing key, or one that is only a
+// directory prefix of stored keys, is not an error and removes nothing. Empty parent directories are left in
+// place.
 func (s *Store) Delete(_ context.Context, key string) error {
 	full, logical, err := s.resolve(key)
 	if err != nil {
@@ -190,10 +207,20 @@ func (s *Store) Delete(_ context.Context, key string) error {
 	if logical == "" {
 		return fmt.Errorf("blob/local: empty key: %w", bizkit.ErrForbidden)
 	}
-	if err := os.Remove(full); err != nil && !missing(err) {
+	if isDir(full) {
+		return nil
+	}
+	if err := os.Remove(full); err != nil && !missing(err) && !isDir(full) {
 		return fmt.Errorf("blob/local: delete %q: %w", key, err)
 	}
 	return nil
+}
+
+// isDir reports whether p is a directory, which a key that is only a prefix
+// of stored keys resolves to.
+func isDir(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && st.IsDir()
 }
 
 // List returns every object whose logical key starts with prefix, sorted by

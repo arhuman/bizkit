@@ -96,8 +96,8 @@ func TestPut_ParentIsAFile(t *testing.T) {
 	if _, err := s.Put(ctx, "a", strings.NewReader("a"), blob.PutOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Put(ctx, "a/b", strings.NewReader("b"), blob.PutOptions{}); err == nil {
-		t.Fatal("Put under a file: want error")
+	if _, err := s.Put(ctx, "a/b", strings.NewReader("b"), blob.PutOptions{}); !errors.Is(err, bizkit.ErrForbidden) {
+		t.Fatalf("Put under a file err = %v, want ErrForbidden", err)
 	}
 }
 
@@ -207,22 +207,11 @@ func TestPrefixCannotBeReplacedOrDeleted(t *testing.T) {
 	if _, err := s.Put(ctx, "dir/a.txt", strings.NewReader("a"), blob.PutOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	ops := []struct {
-		name string
-		do   func() error
-	}{
-		{"Put onto a prefix", func() error {
-			_, err := s.Put(ctx, "dir", strings.NewReader("x"), blob.PutOptions{})
-			return err
-		}},
-		{"Delete of a prefix", func() error { return s.Delete(ctx, "dir") }},
+	if _, err := s.Put(ctx, "dir", strings.NewReader("x"), blob.PutOptions{}); !errors.Is(err, bizkit.ErrForbidden) {
+		t.Errorf("Put onto a prefix err = %v, want ErrForbidden", err)
 	}
-	for _, op := range ops {
-		t.Run(op.name, func(t *testing.T) {
-			if err := op.do(); err == nil || errors.Is(err, bizkit.ErrNotFound) {
-				t.Errorf("err = %v, want a non-NotFound error", err)
-			}
-		})
+	if err := s.Delete(ctx, "dir"); err != nil {
+		t.Errorf("Delete of a prefix err = %v, want nil", err)
 	}
 	requireOnlyObject(t, s, "dir", "dir/a.txt")
 }

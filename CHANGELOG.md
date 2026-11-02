@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `blob`: the `Backend` contract now covers a key that is also a directory prefix of another key. A backend may store both or refuse the second `Put` with `ErrForbidden`, and `Delete` of a key that is only a prefix returns nil and removes nothing. `blobtest` checks both outcomes. `blob/local` refuses with `ErrForbidden`; it used to fail with raw rename, mkdir and "directory not empty" errors. `blob/s3` keeps storing both.
 - `sharelink`: each PIN lock now lasts twice the previous one, from `PINLockDuration` up to the new `MaxPINLockDuration` (24 hours), and only a right PIN resets it. Hosts must persist the new `PINState.Lockouts` field. Every lock used to last 15 minutes, which allowed 480 guesses a day: every 4-digit PIN within a link's 30-day default lifetime.
 - `davfs`: a PROPFIND no longer opens a file without an extension to sniff its type. `getcontenttype`, and the Content-Type of a GET, come from the name's extension, else `application/octet-stream`. A Depth 1 PROPFIND used to call `Tree.Open` on every extensionless file it listed.
 - `davfs`: a PROPFIND now calls `Tree.Stat` at most once per entry; the children of a listed folder come from its `Tree.List` result. A Depth 1 PROPFIND used to stat each entry three or four times.

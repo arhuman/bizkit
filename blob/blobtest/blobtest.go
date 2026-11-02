@@ -36,6 +36,7 @@ func Run(t *testing.T, newBackend Factory) {
 		{"MaxSize", testMaxSize},
 		{"Overwrite", testOverwrite},
 		{"List", testList},
+		{"KeyAndPrefix", testKeyAndPrefix},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -220,4 +221,36 @@ func testList(t *testing.T, b blob.Backend) {
 		}
 		check(t, strings.Join(keys, ",") == strings.Join(tc.want, ","), "List(%q) = %v, want %v", tc.prefix, keys, tc.want)
 	}
+}
+
+// testKeyAndPrefix covers a key that is also a prefix of another key. The
+// backend may store both or refuse the second Put with bizkit.ErrForbidden;
+// either way the first object survives, and deleting a key that is only a
+// prefix is a no-op.
+func testKeyAndPrefix(t *testing.T, b blob.Backend) {
+	ctx := context.Background()
+	for _, tc := range []struct{ first, second string }{
+		{"a/x", "a"},
+		{"b", "b/y"},
+	} {
+		put(t, b, tc.first, tc.first)
+		_, err := b.Put(ctx, tc.second, strings.NewReader(tc.second), blob.PutOptions{})
+		require(t, err == nil || errors.Is(err, bizkit.ErrForbidden),
+			"Put(%q) after Put(%q) err = %v, want nil or ErrForbidden", tc.second, tc.first, err)
+		if err == nil {
+			got := readAll(t, open(t, b, tc.second))
+			check(t, got == tc.second, "content of %q = %q, want %q", tc.second, got, tc.second)
+		} else {
+			_, err = b.Stat(ctx, tc.second)
+			check(t, errors.Is(err, bizkit.ErrNotFound), "Stat(%q) after refused Put err = %v, want ErrNotFound", tc.second, err)
+		}
+		got := readAll(t, open(t, b, tc.first))
+		check(t, got == tc.first, "content of %q = %q, want %q", tc.first, got, tc.first)
+	}
+
+	put(t, b, "p/x", "p/x")
+	err := b.Delete(ctx, "p")
+	check(t, err == nil, "Delete of prefix-only key %q err = %v, want nil", "p", err)
+	got := readAll(t, open(t, b, "p/x"))
+	check(t, got == "p/x", "content of %q after Delete(%q) = %q, want %q", "p/x", "p", got, "p/x")
 }
