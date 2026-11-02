@@ -94,7 +94,7 @@ func violations(rel string, imports []string) []string {
 
 func listModulePackages(t *testing.T) []pkg {
 	t.Helper()
-	cmd := exec.Command("go", "list", "-e", "-json=ImportPath,Deps,TestImports,XTestImports,Error", module+"/...")
+	cmd := exec.CommandContext(t.Context(), "go", "list", "-e", "-json=ImportPath,Deps,TestImports,XTestImports,Error", module+"/...")
 	cmd.Dir = "../.."
 	out, err := cmd.Output()
 	if err != nil {

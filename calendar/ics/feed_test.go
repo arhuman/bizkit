@@ -53,7 +53,7 @@ func newHandler() (*FeedHandler, *logged) {
 
 func do(t *testing.T, h http.Handler, method, path string, header http.Header) (*http.Response, string) {
 	t.Helper()
-	req := httptest.NewRequest(method, path, nil)
+	req := httptest.NewRequestWithContext(t.Context(), method, path, nil)
 	for k, v := range header {
 		req.Header[k] = v
 	}
@@ -77,6 +77,7 @@ func requireHeader(t *testing.T, res *http.Response, key, want string) {
 func TestFeed_GetServesCalendarWithETag(t *testing.T) {
 	h, _ := newHandler()
 	res, body := do(t, h, http.MethodGet, "/feeds/"+goodToken+".ics", nil)
+	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", res.StatusCode)
 	}
@@ -96,6 +97,7 @@ func TestFeed_PathWithoutSuffixAndMuxRouting(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.Handle("/feeds/{token}", h)
 	res, _ := do(t, mux, http.MethodGet, "/feeds/"+goodToken, nil)
+	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want 200", res.StatusCode)
 	}
@@ -105,6 +107,7 @@ func TestFeed_IfNoneMatchAnswers304(t *testing.T) {
 	h, _ := newHandler()
 	path := "/feeds/" + goodToken + ".ics"
 	first, _ := do(t, h, http.MethodGet, path, nil)
+	defer first.Body.Close()
 	etag := first.Header.Get("ETag")
 	if etag == "" {
 		t.Fatal("no ETag")
@@ -117,6 +120,7 @@ func TestFeed_IfNoneMatchAnswers304(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			res, body := do(t, h, http.MethodGet, path, http.Header{"If-None-Match": {inm}})
+			defer res.Body.Close()
 			if res.StatusCode != http.StatusNotModified {
 				t.Fatalf("status = %d, want 304", res.StatusCode)
 			}
@@ -128,6 +132,7 @@ func TestFeed_IfNoneMatchAnswers304(t *testing.T) {
 		})
 	}
 	res, _ := do(t, h, http.MethodGet, path, http.Header{"If-None-Match": {`"stale"`}})
+	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
 		t.Errorf("stale If-None-Match status = %d, want 200", res.StatusCode)
 	}
@@ -138,6 +143,7 @@ func TestFeed_UnknownExpiredForbiddenAreIdentical404(t *testing.T) {
 	for _, path := range []string{"/feeds/s3cr3t-unknown.ics", "/feeds/s3cr3t-expired.ics", "/feeds/s3cr3t-revoked.ics", "/feeds/", "/feeds/.ics"} {
 		t.Run(path, func(t *testing.T) {
 			res, body := do(t, h, http.MethodGet, path, nil)
+			defer res.Body.Close()
 			if res.StatusCode != http.StatusNotFound {
 				t.Fatalf("status = %d, want 404", res.StatusCode)
 			}
@@ -157,7 +163,9 @@ func TestFeed_UnknownExpiredForbiddenAreIdentical404(t *testing.T) {
 func TestFeed_HeadHasHeadersWithoutBody(t *testing.T) {
 	h, _ := newHandler()
 	get, getBody := do(t, h, http.MethodGet, "/feeds/"+goodToken+".ics", nil)
+	defer get.Body.Close()
 	res, body := do(t, h, http.MethodHead, "/feeds/"+goodToken+".ics", nil)
+	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", res.StatusCode)
 	}
@@ -173,6 +181,7 @@ func TestFeed_MethodNotAllowed(t *testing.T) {
 	h, _ := newHandler()
 	for _, m := range []string{http.MethodPost, http.MethodPut, http.MethodDelete} {
 		res, _ := do(t, h, m, "/feeds/"+goodToken+".ics", nil)
+		defer res.Body.Close()
 		if res.StatusCode != http.StatusMethodNotAllowed {
 			t.Errorf("%s status = %d, want 405", m, res.StatusCode)
 		}
@@ -198,6 +207,7 @@ func TestFeed_RedactionNeverExposesToken(t *testing.T) {
 	h, l := newHandler()
 	for _, token := range []string{"s3cr3t-db-down", "s3cr3t-bad-event"} {
 		res, body := do(t, h, http.MethodGet, "/feeds/"+token+".ics", nil)
+		defer res.Body.Close()
 		if res.StatusCode != http.StatusInternalServerError {
 			t.Errorf("%s status = %d, want 500", token, res.StatusCode)
 		}
@@ -218,6 +228,7 @@ func TestFeed_RedactionNeverExposesToken(t *testing.T) {
 func TestFeed_NilOnErrorStill500(t *testing.T) {
 	h := &FeedHandler{Resolve: resolve, Options: Options{Domain: "easybiz.example"}}
 	res, _ := do(t, h, http.MethodGet, "/feeds/s3cr3t-db-down.ics", nil)
+	defer res.Body.Close()
 	if res.StatusCode != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500", res.StatusCode)
 	}

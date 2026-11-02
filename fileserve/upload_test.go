@@ -45,7 +45,7 @@ func uploadRequest(t *testing.T, parts ...formPart) *http.Request {
 	if err := mw.Close(); err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/upload", &buf)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/upload", &buf)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	return req
 }
@@ -208,7 +208,7 @@ func TestUpload_CustomBlocklist(t *testing.T) {
 }
 
 func TestUpload_RejectsNonMultipart(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader("a=b"))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/upload", strings.NewReader("a=b"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	if _, err := NewReader(req, Limits{}); !errors.Is(err, http.ErrNotMultipart) {
 		t.Fatalf("err = %v, want ErrNotMultipart", err)
@@ -216,7 +216,7 @@ func TestUpload_RejectsNonMultipart(t *testing.T) {
 }
 
 func TestUpload_MalformedBody(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader("--xyz\r\nno colon here\r\n\r\nbody\r\n--xyz--\r\n"))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/upload", strings.NewReader("--xyz\r\nno colon here\r\n\r\nbody\r\n--xyz--\r\n"))
 	req.Header.Set("Content-Type", "multipart/form-data; boundary=xyz")
 	u, err := NewReader(req, Limits{})
 	if err != nil {
@@ -249,7 +249,7 @@ func TestUpload_StreamsWithoutBuffering(t *testing.T) {
 		}
 		pw.CloseWithError(err)
 	}()
-	req := httptest.NewRequest(http.MethodPost, "/upload", pr)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/upload", pr)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	u, err := NewReader(req, Limits{})
 	if err != nil {

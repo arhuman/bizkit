@@ -18,7 +18,7 @@ func serve(t *testing.T, handlers ...gin.HandlerFunc) *httptest.ResponseRecorder
 	r := gin.New()
 	r.GET("/x", handlers...)
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/x", nil))
+	r.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/x", nil))
 	return w
 }
 

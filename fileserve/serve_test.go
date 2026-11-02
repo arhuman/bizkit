@@ -16,7 +16,7 @@ const body = "0123456789abcdef"
 
 func serve(t *testing.T, method string, m Meta, header http.Header) *http.Response {
 	t.Helper()
-	req := httptest.NewRequest(method, "/f", nil)
+	req := httptest.NewRequestWithContext(t.Context(), method, "/f", nil)
 	for k, v := range header {
 		req.Header[k] = v
 	}
@@ -49,6 +49,7 @@ func TestServe_SVGAlwaysAttachment(t *testing.T) {
 	} {
 		t.Run(ct, func(t *testing.T) {
 			res := serve(t, http.MethodGet, Meta{Name: "logo.svg", ContentType: ct}, nil)
+			defer res.Body.Close()
 			if got := dispositionType(res); got != "attachment" {
 				t.Fatalf("disposition = %q, want attachment", got)
 			}
@@ -77,6 +78,7 @@ func TestServe_InlineAllowlist(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.ct, func(t *testing.T) {
 			res := serve(t, http.MethodGet, Meta{Name: "f", ContentType: tt.ct}, nil)
+			defer res.Body.Close()
 			if got := dispositionType(res); got != "inline" {
 				t.Fatalf("disposition = %q, want inline", got)
 			}
@@ -110,6 +112,7 @@ func TestServe_AttachmentDefault(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.ct, func(t *testing.T) {
 			res := serve(t, http.MethodGet, Meta{Name: "f", ContentType: tt.ct}, nil)
+			defer res.Body.Close()
 			if got := dispositionType(res); got != "attachment" {
 				t.Fatalf("disposition = %q, want attachment", got)
 			}
@@ -130,6 +133,7 @@ func TestServe_Nosniff(t *testing.T) {
 	for _, ct := range []string{"image/png", "application/pdf", "text/html", ""} {
 		t.Run(ct, func(t *testing.T) {
 			res := serve(t, http.MethodGet, Meta{Name: "f", ContentType: ct}, nil)
+			defer res.Body.Close()
 			if got := res.Header.Get("X-Content-Type-Options"); got != "nosniff" {
 				t.Fatalf("X-Content-Type-Options = %q", got)
 			}
@@ -153,6 +157,7 @@ func TestServe_Range(t *testing.T) {
 		t.Run(tt.rng, func(t *testing.T) {
 			res := serve(t, http.MethodGet, Meta{Name: "doc.pdf", ContentType: "application/pdf"},
 				http.Header{"Range": {tt.rng}})
+			defer res.Body.Close()
 			if res.StatusCode != tt.wantCode {
 				t.Fatalf("status = %d, want %d", res.StatusCode, tt.wantCode)
 			}
@@ -185,6 +190,7 @@ func TestServe_FilenameEncoding(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			res := serve(t, http.MethodGet, Meta{Name: tt.name, ContentType: "application/zip"}, nil)
+			defer res.Body.Close()
 			got := res.Header.Get("Content-Disposition")
 			if got != tt.want {
 				t.Fatalf("Content-Disposition = %q, want %q", got, tt.want)
@@ -198,6 +204,7 @@ func TestServe_FilenameEncoding(t *testing.T) {
 
 func TestServe_Head(t *testing.T) {
 	res := serve(t, http.MethodHead, Meta{Name: "a.png", ContentType: "image/png"}, nil)
+	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", res.StatusCode)
 	}
@@ -216,6 +223,7 @@ func TestServe_ConditionalModTime(t *testing.T) {
 	mod := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	res := serve(t, http.MethodGet, Meta{Name: "a.png", ContentType: "image/png", ModTime: mod},
 		http.Header{"If-Modified-Since": {mod.Format(http.TimeFormat)}})
+	defer res.Body.Close()
 	if res.StatusCode != http.StatusNotModified {
 		t.Fatalf("status = %d, want 304", res.StatusCode)
 	}
@@ -245,7 +253,7 @@ func TestServe_Object(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
 			_, _ = obj.Seek(0, io.SeekStart)
-			req := httptest.NewRequest(http.MethodGet, "/f", nil)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/f", nil)
 			req.Header.Set("Range", "bytes=4-5")
 			rec := httptest.NewRecorder()
 			ServeObject(rec, req, tt.name, obj)

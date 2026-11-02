@@ -40,7 +40,7 @@ type result struct {
 
 func do(t *testing.T, h http.Handler, method, target string, body io.Reader, header map[string]string) result {
 	t.Helper()
-	req := httptest.NewRequest(method, target, body)
+	req := httptest.NewRequestWithContext(t.Context(), method, target, body)
 	for k, v := range header {
 		req.Header.Set(k, v)
 	}
@@ -227,7 +227,7 @@ func TestPut_OverMaxFileSizeReturns413(t *testing.T) {
 			tree := fixture()
 			h := davfs.New(tree, davfs.Options{Prefix: "/dav", MaxFileSize: 5})
 			body := strings.NewReader("123456")
-			req := httptest.NewRequest(http.MethodPut, "/dav/big.txt", struct{ io.Reader }{body})
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPut, "/dav/big.txt", struct{ io.Reader }{body})
 			req.ContentLength = length
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, req)
@@ -382,7 +382,7 @@ func TestTraversal_EveryMethodForbidden(t *testing.T) {
 			t.Run(m+" "+target, func(t *testing.T) {
 				tree := fixture()
 				h := davfs.New(tree, davfs.Options{Prefix: "/dav"})
-				req := httptest.NewRequest(m, "/", strings.NewReader("x"))
+				req := httptest.NewRequestWithContext(t.Context(), m, "/", strings.NewReader("x"))
 				req.URL.Path = mustUnescape(t, target)
 				req.Header.Set("Destination", "/dav/moved.txt")
 				rec := httptest.NewRecorder()
@@ -401,7 +401,7 @@ func TestTraversal_EveryMethodForbidden(t *testing.T) {
 
 func mustUnescape(t *testing.T, s string) string {
 	t.Helper()
-	req, err := http.NewRequest(http.MethodGet, "http://example.com"+s, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.com"+s, nil)
 	if err != nil {
 		t.Fatalf("parse %q: %v", s, err)
 	}
