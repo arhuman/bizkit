@@ -92,7 +92,7 @@ func NewReader(r *http.Request, lim Limits) (*Reader, error) {
 	if err != nil {
 		return nil, fmt.Errorf("fileserve: %w", err)
 	}
-	lim = lim.withDefaults()
+	lim = lim.WithDefaults()
 	exts := lim.BlockedExts
 	if exts == nil {
 		exts = defaultBlockedExts
@@ -234,7 +234,11 @@ func (l Limits) size(p *Part) int64 {
 	return l.MaxFileSize
 }
 
-func (l Limits) withDefaults() Limits {
+// WithDefaults returns l with every zero or negative numeric field replaced
+// by its Default value; positive fields are kept. BlockedExts is returned
+// unchanged: nil keeps meaning the default list, resolved by NewReader. These
+// are the limits NewReader enforces for l.
+func (l Limits) WithDefaults() Limits {
 	if l.MaxFileSize <= 0 {
 		l.MaxFileSize = DefaultMaxFileSize
 	}

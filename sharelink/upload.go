@@ -44,22 +44,16 @@ func (c UploadCaps) Limits(base fileserve.Limits, usedFiles int, usedBytes int64
 		if left <= 0 {
 			return fileserve.Limits{}, fmt.Errorf("sharelink: link file cap %d reached: %w", c.MaxFiles, bizkit.ErrTooLarge)
 		}
-		base.MaxFiles = min(orDefault(base.MaxFiles, fileserve.DefaultMaxFiles), left)
+		base.MaxFiles = min(base.WithDefaults().MaxFiles, left)
 	}
 	if c.MaxBytes > 0 {
 		left := c.MaxBytes - usedBytes
 		if left <= 0 {
 			return fileserve.Limits{}, fmt.Errorf("sharelink: link size cap %d reached: %w", c.MaxBytes, bizkit.ErrTooLarge)
 		}
-		base.MaxTotal = min(orDefault(base.MaxTotal, fileserve.DefaultMaxTotal), left)
-		base.MaxFileSize = min(orDefault(base.MaxFileSize, fileserve.DefaultMaxFileSize), left)
+		def := base.WithDefaults()
+		base.MaxTotal = min(def.MaxTotal, left)
+		base.MaxFileSize = min(def.MaxFileSize, left)
 	}
 	return base, nil
-}
-
-func orDefault[T int | int64](v, def T) T {
-	if v <= 0 {
-		return def
-	}
-	return v
 }

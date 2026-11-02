@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `fileserve`: `Limits.WithDefaults` returns the limits with every zero or negative numeric field set to its Default value, the same limits `NewReader` enforces. `sharelink.UploadCaps.Limits` now uses it.
+
 ### Fixed
 
 - `blob/local`: `Put` now refuses a key with a segment starting with `.bizkit-tmp-` with `ErrForbidden`. It used to store the object, which `Stat` and `Open` found but `List` never returned.
