@@ -2,8 +2,7 @@
 
 ## Supported versions
 
-Which versions receive security fixes. Adjust the rows to the project's release model
-(a single rolling deployment supports only the latest tag; a library may support the last N minors).
+Security fixes land on `main` and ship in the next tag. Older tags are not patched.
 
 | Version | Supported |
 | ------- | --------- |
@@ -12,6 +11,8 @@ Which versions receive security fixes. Adjust the rows to the project's release 
 
 ## Reporting a vulnerability
 
-Do not open a public issue for a security report. Email TODO (security contact) with a
-description and, if possible, reproduction steps. Expect an acknowledgement within TODO
-(e.g. a few business days). Please allow time for a fix before any public disclosure.
+Do not open a public issue for a security report. Report it privately through GitHub
+private vulnerability reporting at
+<https://github.com/arhuman/bizkit/security/advisories/new>, with a description and, if
+possible, reproduction steps. Expect an acknowledgement within 7 days. Please allow time
+for a fix before any public disclosure.
