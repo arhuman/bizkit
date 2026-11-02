@@ -60,20 +60,33 @@ type Meta struct {
 // Serve does not close content and does not look up the file: a missing file
 // is the caller's to report before calling Serve.
 func Serve(w http.ResponseWriter, r *http.Request, m Meta, content io.ReadSeeker) {
-	mediaType := normalizeType(m.ContentType)
+	h := w.Header()
+	h.Set("Content-Type", normalizeType(m.ContentType))
+	SetPolicy(h, m.Name, m.ContentType)
+	http.ServeContent(w, r, "", m.ModTime, content)
+}
+
+// SetPolicy sets on h the policy headers Serve sends with a file named name
+// whose response carries contentType: an inline Content-Disposition when
+// Inline reports true and an attachment one otherwise,
+// X-Content-Type-Options: nosniff, and the sandboxing Content-Security-Policy
+// for every type except PDF.
+//
+// It is for a handler that writes the response itself, such as a WebDAV
+// server, and must run before the status is written. It leaves Content-Type
+// and every Range, caching or conditional header untouched, so contentType
+// must be the type the response actually declares.
+func SetPolicy(h http.Header, name, contentType string) {
+	mediaType := normalizeType(contentType)
 	disposition := "attachment"
 	if inlineTypes[mediaType] {
 		disposition = "inline"
 	}
-
-	h := w.Header()
-	h.Set("Content-Type", mediaType)
-	h.Set("Content-Disposition", contentDisposition(disposition, m.Name))
+	h.Set("Content-Disposition", contentDisposition(disposition, name))
 	h.Set("X-Content-Type-Options", "nosniff")
 	if mediaType != pdfType {
 		h.Set("Content-Security-Policy", sandboxCSP)
 	}
-	http.ServeContent(w, r, "", m.ModTime, content)
 }
 
 // ServeObject serves an open blob.Object using its Info for the content type

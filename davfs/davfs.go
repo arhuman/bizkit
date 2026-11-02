@@ -31,6 +31,11 @@
 //   - Bounded listing: a PROPFIND with Depth infinity, or with no Depth header
 //     (which RFC 4918 reads as infinity), answers 403 with the
 //     propfind-finite-depth precondition instead of walking the whole mount.
+//   - Safe content: a GET, HEAD or POST serving a file follows the fileserve
+//     policy (fileserve.SetPolicy): nosniff, a sandbox Content-Security-Policy
+//     except for PDF, and an inline disposition only for a type
+//     fileserve.Inline accepts, attachment otherwise, so stored HTML or SVG
+//     never runs as a page on the host's origin.
 //
 // The host keeps everything tied to its users and data: authentication (and
 // any credential caching), mapping a principal to a Tree root, per-path
@@ -52,7 +57,6 @@ import (
 	"path"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"golang.org/x/net/webdav"
@@ -217,7 +221,16 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if xmlMethod(r.Method) {
 		r2.Body = xmlBody{ReadCloser: http.MaxBytesReader(w, r.Body, maxXMLBody), out: out}
 	}
-	h.dav.ServeHTTP(&statusWriter{ResponseWriter: w, out: out}, r2)
+	h.dav.ServeHTTP(&statusWriter{ResponseWriter: w, out: out, served: servedName(r.Method, name)}, r2)
+}
+
+// servedName returns the filename offered for name when x/net/webdav answers
+// method with the file's content through http.ServeContent, else "".
+func servedName(method, name string) string {
+	if method == http.MethodGet || method == http.MethodHead || method == http.MethodPost {
+		return path.Base(name)
+	}
+	return ""
 }
 
 // refused answers a request davfs rejects from its headers alone, before
@@ -380,109 +393,3 @@ func writeFiniteDepthError(w http.ResponseWriter) {
 	_, _ = io.WriteString(w, `<?xml version="1.0" encoding="utf-8"?>`+"\n"+
 		`<D:error xmlns:D="DAV:"><D:propfind-finite-depth/></D:error>`)
 }
-
-type outcomeKey struct{}
-
-// outcome carries, per request, the status a Tree error wrapping
-// ErrForbidden or ErrTooLarge, or an XML body over maxXMLBody, calls for. x/net/webdav picks its own status for
-// a failed FileSystem call (405 for any failed PUT, for instance), so
-// statusWriter replaces it with this one.
-//
-// It also caches the entries the request has already statted or listed, by
-// name: a PROPFIND stats every entry it reports three or four times. Any
-// change to the Tree drops the cache.
-type outcome struct {
-	mu      sync.Mutex
-	status  int
-	entries map[string]Entry
-}
-
-func outcomeOf(ctx context.Context) *outcome {
-	out, _ := ctx.Value(outcomeKey{}).(*outcome)
-	return out
-}
-
-func (o *outcome) entry(name string) (Entry, bool) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	e, ok := o.entries[name]
-	return e, ok
-}
-
-func (o *outcome) remember(name string, e Entry) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if o.entries == nil {
-		o.entries = map[string]Entry{}
-	}
-	o.entries[name] = e
-}
-
-func (o *outcome) forget() {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.entries = nil
-}
-
-// record notes the status err maps to, keeping the first one.
-func record(ctx context.Context, err error) {
-	out := outcomeOf(ctx)
-	if out == nil {
-		return
-	}
-	status := 0
-	switch {
-	case errors.Is(err, bizkit.ErrForbidden):
-		status = http.StatusForbidden
-	case errors.Is(err, bizkit.ErrTooLarge):
-		status = http.StatusRequestEntityTooLarge
-	default:
-		return
-	}
-	out.set(status)
-}
-
-// set keeps the first status recorded.
-func (o *outcome) set(status int) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if o.status == 0 {
-		o.status = status
-	}
-}
-
-func (o *outcome) get() int {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	return o.status
-}
-
-// statusWriter rewrites an error status to the recorded outcome, and the
-// status text x/net/webdav writes after it, so status and body agree.
-type statusWriter struct {
-	http.ResponseWriter
-	out       *outcome
-	rewritten int
-}
-
-func (w *statusWriter) WriteHeader(code int) {
-	if s := w.out.get(); code >= http.StatusBadRequest && s != 0 && s != code {
-		code, w.rewritten = s, s
-	}
-	w.ResponseWriter.WriteHeader(code)
-}
-
-func (w *statusWriter) Write(p []byte) (int, error) {
-	if w.rewritten == 0 {
-		return w.ResponseWriter.Write(p)
-	}
-	status := w.rewritten
-	w.rewritten = 0
-	if _, err := io.WriteString(w.ResponseWriter, http.StatusText(status)); err != nil {
-		return 0, err
-	}
-	return len(p), nil
-}
-
-// Unwrap exposes the underlying writer to http.ResponseController.
-func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }

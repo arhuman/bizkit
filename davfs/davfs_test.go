@@ -673,3 +673,65 @@ func TestLock_RootRefusedAndTimeoutCapped(t *testing.T) {
 		}
 	})
 }
+
+func TestGet_ServesWithFileservePolicy(t *testing.T) {
+	const sandbox = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+	tree := newMemTree(map[string]string{
+		"/x.html":   "<script>alert(1)</script>",
+		"/x.svg":    `<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`,
+		"/noext":    "<html><script>alert(1)</script></html>",
+		"/p.png":    "\x89PNG\r\n\x1a\n",
+		"/d.pdf":    "%PDF-1.4",
+		"/dir/":     "",
+		"/dir/a.js": "alert(1)",
+	})
+	h := davfs.New(tree, davfs.Options{Prefix: "/dav"})
+
+	cases := []struct {
+		method, target, disposition, csp string
+	}{
+		{http.MethodGet, "/dav/x.html", `attachment; filename="x.html"; filename*=UTF-8''x.html`, sandbox},
+		{http.MethodHead, "/dav/x.html", `attachment; filename="x.html"; filename*=UTF-8''x.html`, sandbox},
+		{http.MethodGet, "/dav/x.svg", `attachment; filename="x.svg"; filename*=UTF-8''x.svg`, sandbox},
+		{http.MethodGet, "/dav/noext", `attachment; filename="noext"; filename*=UTF-8''noext`, sandbox},
+		{http.MethodGet, "/dav/dir/a.js", `attachment; filename="a.js"; filename*=UTF-8''a.js`, sandbox},
+		{http.MethodGet, "/dav/p.png", `inline; filename="p.png"; filename*=UTF-8''p.png`, sandbox},
+		{http.MethodGet, "/dav/d.pdf", `inline; filename="d.pdf"; filename*=UTF-8''d.pdf`, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.method+" "+c.target, func(t *testing.T) {
+			req := httptest.NewRequestWithContext(t.Context(), c.method, c.target, nil)
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rec.Code)
+			}
+			assertHeaders(t, rec.Header(), map[string]string{
+				"Content-Disposition":     c.disposition,
+				"X-Content-Type-Options":  "nosniff",
+				"Content-Security-Policy": c.csp,
+			})
+		})
+	}
+
+	t.Run("error carries no disposition", func(t *testing.T) {
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/dav/missing.html", nil)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404", rec.Code)
+		}
+		if got := rec.Header().Get("Content-Disposition"); got != "" {
+			t.Fatalf("Content-Disposition = %q, want none", got)
+		}
+	})
+}
+
+func assertHeaders(t *testing.T, hdr http.Header, want map[string]string) {
+	t.Helper()
+	for k, v := range want {
+		if got := hdr.Get(k); got != v {
+			t.Errorf("%s = %q, want %q", k, got, v)
+		}
+	}
+}

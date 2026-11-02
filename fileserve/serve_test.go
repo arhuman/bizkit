@@ -270,3 +270,22 @@ func TestServe_Object(t *testing.T) {
 		})
 	}
 }
+
+func TestSetPolicy_MatchesServeAndKeepsContentType(t *testing.T) {
+	for _, ct := range []string{"text/html; charset=utf-8", "image/svg+xml", "image/png", pdfType, ""} {
+		t.Run(ct, func(t *testing.T) {
+			res := serve(t, http.MethodGet, Meta{Name: "f", ContentType: ct}, nil)
+			defer res.Body.Close()
+			h := http.Header{"Content-Type": {"multipart/byteranges; boundary=x"}}
+			SetPolicy(h, "f", ct)
+			if got := h.Get("Content-Type"); got != "multipart/byteranges; boundary=x" {
+				t.Fatalf("Content-Type = %q, want it untouched", got)
+			}
+			for _, k := range []string{"Content-Disposition", "X-Content-Type-Options", "Content-Security-Policy"} {
+				if got, want := h.Get(k), res.Header.Get(k); got != want {
+					t.Errorf("%s = %q, Serve sends %q", k, got, want)
+				}
+			}
+		})
+	}
+}
