@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `blob/local`: `List` and `ListPage` with a prefix that does not end in `/` no longer descend into sibling directories that cannot hold a matching key. Listing `ws1` used to walk all of `ws2`, and an unreadable `ws2` failed the listing.
 - `davfs`: a GET, HEAD or POST that serves a file now carries the `fileserve` policy: `X-Content-Type-Options: nosniff`, an inline Content-Disposition only for a type `fileserve.Inline` accepts, an attachment one otherwise, and the sandbox Content-Security-Policy for every type but PDF. Stored HTML or SVG used to be served as a live page on the origin mounting davfs.
 - `davfs`: a MOVE or COPY Destination is now percent-decoded once, so the name `Options.Authorize` checks is the name the Tree receives. x/net/webdav used to decode it a second time: `/dav/public/%252e%252e/private/x` was authorized as a name under `/public` and then written to `/private/x`, and `100%2541.txt` became `100A.txt`.
 - `blob`: the `Backend` contract now covers a key that is also a directory prefix of another key. A backend may store both or refuse the second `Put` with `ErrForbidden`, and `Delete` of a key that is only a prefix returns nil and removes nothing. `blobtest` checks both outcomes. `blob/local` refuses with `ErrForbidden`; it used to fail with raw rename, mkdir and "directory not empty" errors. `blob/s3` keeps storing both.

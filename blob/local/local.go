@@ -292,7 +292,7 @@ func (l *lister) visit(p string, d fs.DirEntry, err error) error {
 	}
 	key := filepath.ToSlash(rel)
 	if d.IsDir() {
-		if key != "." && l.allBeforeCursor(key+"/") {
+		if key != "." && (l.outsidePrefix(key+"/") || l.allBeforeCursor(key+"/")) {
 			return fs.SkipDir
 		}
 		return nil
@@ -314,6 +314,12 @@ func (l *lister) add(key string, d fs.DirEntry) error {
 		l.trim()
 	}
 	return nil
+}
+
+// outsidePrefix reports whether no key starting with dir can start with match,
+// so a prefix without a trailing slash never walks its non-matching siblings.
+func (l *lister) outsidePrefix(dir string) bool {
+	return !strings.HasPrefix(dir, l.match) && !strings.HasPrefix(l.match, dir)
 }
 
 // allBeforeCursor reports whether every key starting with dir sorts at or

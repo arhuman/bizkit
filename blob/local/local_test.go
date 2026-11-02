@@ -312,3 +312,51 @@ func infoKeys(infos []blob.Info) []string {
 	}
 	return keys
 }
+
+// TestList_PrunesNonMatchingSiblings lists prefixes without a trailing slash
+// beside unreadable sibling directories that cannot hold a matching key: the
+// walk must not descend into them, so the listing succeeds.
+func TestList_PrunesNonMatchingSiblings(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory permissions")
+	}
+	s := newStore(t)
+	ctx := context.Background()
+	for _, key := range []string{"ws1/a", "ws1/sub/b", "ws1/zz/c", "ws1x/d", "ws2/e"} {
+		if _, err := s.Put(ctx, key, strings.NewReader(key), blob.PutOptions{}); err != nil {
+			t.Fatalf("Put(%q): %v", key, err)
+		}
+	}
+	lockDirs(t, s, "ws2", "ws1/zz")
+
+	for prefix, want := range map[string]string{"ws1x": "ws1x/d", "ws1/s": "ws1/sub/b", "ws1/a": "ws1/a"} {
+		requireListing(t, s, prefix, want)
+	}
+}
+
+// lockDirs removes every permission from each directory under the store root
+// until the test ends.
+func lockDirs(t *testing.T, s *Store, dirs ...string) {
+	t.Helper()
+	for _, dir := range dirs {
+		locked := filepath.Join(s.root, filepath.FromSlash(dir))
+		if err := os.Chmod(locked, 0); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(locked, 0o750) })
+	}
+}
+
+// requireListing checks that List and a single ListPage of prefix both return
+// exactly the comma-separated keys in want.
+func requireListing(t *testing.T, s *Store, prefix, want string) {
+	t.Helper()
+	got, err := s.List(t.Context(), prefix)
+	if err != nil || strings.Join(infoKeys(got), ",") != want {
+		t.Errorf("List(%q) = %v, %v; want %s", prefix, infoKeys(got), err, want)
+	}
+	page, next, err := s.ListPage(t.Context(), prefix, "", 10)
+	if err != nil || next != "" || strings.Join(infoKeys(page), ",") != want {
+		t.Errorf("ListPage(%q) = %v, %q, %v; want %s", prefix, infoKeys(page), next, err, want)
+	}
+}
