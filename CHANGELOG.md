@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `davfs`: PROPFIND with `Depth: infinity`, or with no Depth header, now answers 403 with the `propfind-finite-depth` precondition. It used to walk every object under the mount in one request.
 - `davfs`: MOVE or COPY onto a folder that contains the source now answers 403. It used to delete that folder, source included, before failing (MOVE) or replace it with the copied file (COPY).
 
 ## [0.2.0] - 2026-11-01

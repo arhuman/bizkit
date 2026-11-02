@@ -425,3 +425,28 @@ func mustUnescape(t *testing.T, s string) string {
 	}
 	return req.URL.Path
 }
+
+func TestPropfind_InfiniteDepthForbidden(t *testing.T) {
+	for _, header := range []map[string]string{nil, {"Depth": "infinity"}, {"Depth": "Infinity"}} {
+		t.Run(fmt.Sprint(header), func(t *testing.T) {
+			tree := fixture()
+			h := davfs.New(tree, davfs.Options{Prefix: "/dav"})
+			res := do(t, h, "PROPFIND", "/dav/", nil, header)
+			if res.code != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403", res.code)
+			}
+			if !strings.Contains(res.body, "<D:propfind-finite-depth/>") {
+				t.Fatalf("body lacks the propfind-finite-depth precondition:\n%s", res.body)
+			}
+			if n := tree.callCount(); n != 0 {
+				t.Fatalf("tree calls = %d, want 0", n)
+			}
+		})
+	}
+	for _, depth := range []string{"0", "1"} {
+		res := do(t, davfs.New(fixture(), davfs.Options{Prefix: "/dav"}), "PROPFIND", "/dav/", nil, map[string]string{"Depth": depth})
+		if res.code != http.StatusMultiStatus {
+			t.Fatalf("Depth %s status = %d, want 207", depth, res.code)
+		}
+	}
+}

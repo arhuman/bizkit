@@ -22,6 +22,9 @@
 //     bizkit.ErrForbidden answers 403 and one wrapping bizkit.ErrTooLarge
 //     answers 413. Options.MaxFileSize answers 413 too, before reading a body
 //     whose declared length is over it, and while streaming otherwise.
+//   - Bounded listing: a PROPFIND with Depth infinity, or with no Depth header
+//     (which RFC 4918 reads as infinity), answers 403 with the
+//     propfind-finite-depth precondition instead of walking the whole mount.
 //
 // The host keeps everything tied to its users and data: authentication (and
 // any credential caching), mapping a principal to a Tree root, per-path
@@ -170,8 +173,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeStatus(w, statusOf(err))
 		return
 	}
-	if r.Method == http.MethodPut && h.maxSize > 0 && r.ContentLength > h.maxSize {
-		writeStatus(w, http.StatusRequestEntityTooLarge)
+	if h.refused(w, r) {
 		return
 	}
 
@@ -182,6 +184,20 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r2.Header.Set("Destination", h.prefix+dest)
 	}
 	h.dav.ServeHTTP(&statusWriter{ResponseWriter: w, out: out}, r2)
+}
+
+// refused answers a request davfs rejects from its headers alone, before
+// x/net/webdav reads a body or touches the Tree, and reports whether it did.
+func (h *handler) refused(w http.ResponseWriter, r *http.Request) bool {
+	switch {
+	case r.Method == http.MethodPut && h.maxSize > 0 && r.ContentLength > h.maxSize:
+		writeStatus(w, http.StatusRequestEntityTooLarge)
+	case r.Method == "PROPFIND" && infiniteDepth(r.Header):
+		writeFiniteDepthError(w)
+	default:
+		return false
+	}
+	return true
 }
 
 // scoped maps a decoded URL path to its clean Tree name, reporting false when
@@ -269,6 +285,22 @@ func statusOf(err error) int {
 
 func writeStatus(w http.ResponseWriter, status int) {
 	http.Error(w, http.StatusText(status), status)
+}
+
+// infiniteDepth reports whether a PROPFIND asks for the whole subtree: RFC
+// 4918 reads an absent Depth header as infinity.
+func infiniteDepth(hdr http.Header) bool {
+	d, ok := hdr["Depth"]
+	return !ok || len(d) == 0 || strings.EqualFold(strings.TrimSpace(d[0]), "infinity")
+}
+
+// writeFiniteDepthError answers 403 with the propfind-finite-depth
+// precondition of RFC 4918 section 9.1.
+func writeFiniteDepthError(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	w.WriteHeader(http.StatusForbidden)
+	_, _ = io.WriteString(w, `<?xml version="1.0" encoding="utf-8"?>`+"\n"+
+		`<D:error xmlns:D="DAV:"><D:propfind-finite-depth/></D:error>`)
 }
 
 type outcomeKey struct{}
