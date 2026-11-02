@@ -13,11 +13,11 @@ TODO
 
 | Target | Purpose |
 | ------ | ------- |
-| `make build` | Compile the binary (version-stamped via `-ldflags`). |
-| `make test` | Unit + integration tests. |
-| `make fulltest` | All tests including DB-backed paths. Run before committing storage/handler changes. |
+| `make test` | Short unit tests (`-short`) for the red/green loop. |
+| `make fulltest` | Every package with the race detector and coverage. Run before committing. |
+| `make test-s3` | S3 backend suite against a disposable MinIO from `docker-compose.test.yml` (needs Docker). |
 | `make cover` | Tests with coverage; fails below `COVER_MIN`. |
-| `make audit` | `go vet` + `golangci-lint` + `govulncheck` + coverage gate. Same command locally and in CI. |
+| `make audit` | `go mod verify` + `gofmt` + file-length check + `golangci-lint` + `govulncheck` + coverage gate. Same command locally and in CI. |
 | `make tidy` | `go fmt` + `go mod tidy`. |
 | `make ci` | Full local pipeline (`tidy` + `audit` + `fulltest`). |
 | `make release` | Derive the next semver from Conventional Commits, gate via `make ci`, tag and push. |
