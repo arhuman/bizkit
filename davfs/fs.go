@@ -59,17 +59,9 @@ func (f *fileSystem) OpenFile(ctx context.Context, name string, flag int, _ os.F
 		entry = e
 	}
 	if entry.IsDir {
-		entries, err := f.tree.List(ctx, name)
-		if err != nil {
-			return nil, f.fail(ctx, "open", name, err)
-		}
-		return &dirFile{entry: entry, entries: entries}, nil
+		return &dirFile{ctx: ctx, fs: f, name: name, entry: entry}, nil
 	}
-	rc, err := f.tree.Open(ctx, name)
-	if err != nil {
-		return nil, f.fail(ctx, "open", name, err)
-	}
-	return &readFile{ReadSeekCloser: rc, entry: entry}, nil
+	return &readFile{ctx: ctx, fs: f, name: name, entry: entry}, nil
 }
 
 // openWrite checks the parent is an existing directory, which WebDAV answers

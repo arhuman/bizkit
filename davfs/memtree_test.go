@@ -25,6 +25,8 @@ type memTree struct {
 	// quota makes a Put longer than this many bytes fail with ErrTooLarge.
 	quota int
 	calls int
+	lists int
+	opens int
 }
 
 type memNode struct {
@@ -81,6 +83,7 @@ func (t *memTree) Stat(_ context.Context, name string) (davfs.Entry, error) {
 func (t *memTree) List(_ context.Context, dir string) ([]davfs.Entry, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.lists++
 	if err := t.check(dir); err != nil {
 		return nil, err
 	}
@@ -101,6 +104,7 @@ func (memReader) Close() error { return nil }
 func (t *memTree) Open(_ context.Context, name string) (io.ReadSeekCloser, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.opens++
 	if err := t.check(name); err != nil {
 		return nil, err
 	}
@@ -207,4 +211,11 @@ func (t *memTree) callCount() int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.calls
+}
+
+// listOpenCounts reports how many times List and Open were called.
+func (t *memTree) listOpenCounts() (lists, opens int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.lists, t.opens
 }

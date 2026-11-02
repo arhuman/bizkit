@@ -450,3 +450,18 @@ func TestPropfind_InfiniteDepthForbidden(t *testing.T) {
 		}
 	}
 }
+
+func TestPropfind_ListingOpensNoContent(t *testing.T) {
+	tree := fixture()
+	h := davfs.New(tree, davfs.Options{Prefix: "/dav"})
+	res := do(t, h, "PROPFIND", "/dav/", nil, map[string]string{"Depth": "1"})
+	if res.code != http.StatusMultiStatus {
+		t.Fatalf("status = %d, want 207", res.code)
+	}
+	if !strings.Contains(res.body, "<D:getcontentlength>5</D:getcontentlength>") {
+		t.Fatalf("body lacks a.txt's length: %s", res.body)
+	}
+	if lists, opens := tree.listOpenCounts(); lists != 1 || opens != 0 {
+		t.Fatalf("Depth 1 PROPFIND made %d List and %d Open, want 1 List and 0 Open", lists, opens)
+	}
+}

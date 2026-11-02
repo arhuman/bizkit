@@ -11,12 +11,51 @@ import (
 	"github.com/arhuman/bizkit"
 )
 
-// readFile is a regular file opened for reading. It embeds only the
-// io.ReadSeekCloser method set, so a Tree reader's WriteTo, if any, never
-// bypasses a destination's ReadFrom during COPY.
+// readFile is a regular file opened for reading. x/net/webdav opens every
+// listed file during PROPFIND to read only its Stat, so the Tree reader is
+// opened on the first Read or Seek. It keeps only the io.ReadSeekCloser
+// method set, so a Tree reader's WriteTo, if any, never bypasses a
+// destination's ReadFrom during COPY.
 type readFile struct {
-	io.ReadSeekCloser
+	ctx   context.Context
+	fs    *fileSystem
+	name  string
 	entry Entry
+	rc    io.ReadSeekCloser
+}
+
+func (f *readFile) reader() (io.ReadSeekCloser, error) {
+	if f.rc == nil {
+		rc, err := f.fs.tree.Open(f.ctx, f.name)
+		if err != nil {
+			return nil, f.fs.fail(f.ctx, "open", f.name, err)
+		}
+		f.rc = rc
+	}
+	return f.rc, nil
+}
+
+func (f *readFile) Read(p []byte) (int, error) {
+	rc, err := f.reader()
+	if err != nil {
+		return 0, err
+	}
+	return rc.Read(p)
+}
+
+func (f *readFile) Seek(offset int64, whence int) (int64, error) {
+	rc, err := f.reader()
+	if err != nil {
+		return 0, err
+	}
+	return rc.Seek(offset, whence)
+}
+
+func (f *readFile) Close() error {
+	if f.rc == nil {
+		return nil
+	}
+	return f.rc.Close()
 }
 
 func (f *readFile) Stat() (fs.FileInfo, error) { return fileInfo{f.entry}, nil }
@@ -29,10 +68,15 @@ func (f *readFile) Write([]byte) (int, error) {
 	return 0, fmt.Errorf("davfs: %q: opened read-only", f.entry.Name)
 }
 
-// dirFile is a directory whose children were listed once at open time.
+// dirFile is a directory whose children are listed once, on the first
+// Readdir, since PROPFIND opens every listed directory only to Stat it.
 type dirFile struct {
+	ctx     context.Context
+	fs      *fileSystem
+	name    string
 	entry   Entry
 	entries []Entry
+	listed  bool
 	offset  int
 }
 
@@ -51,9 +95,24 @@ func (f *dirFile) Write([]byte) (int, error) {
 	return 0, fmt.Errorf("davfs: %q: is a directory", f.entry.Name)
 }
 
+func (f *dirFile) list() error {
+	if f.listed {
+		return nil
+	}
+	entries, err := f.fs.tree.List(f.ctx, f.name)
+	if err != nil {
+		return f.fs.fail(f.ctx, "open", f.name, err)
+	}
+	f.entries, f.listed = entries, true
+	return nil
+}
+
 // Readdir returns up to count remaining children, or all of them when
 // count <= 0, with io.EOF once exhausted for a positive count (http.File).
 func (f *dirFile) Readdir(count int) ([]fs.FileInfo, error) {
+	if err := f.list(); err != nil {
+		return nil, err
+	}
 	if count > 0 && f.offset >= len(f.entries) {
 		return nil, io.EOF
 	}
