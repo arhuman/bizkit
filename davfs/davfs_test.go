@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/arhuman/bizkit"
 	"github.com/arhuman/bizkit/davfs"
@@ -497,4 +498,72 @@ func TestXMLBody_OverLimitReturns413(t *testing.T) {
 			t.Fatalf("%s with a small body: status = %d", b.method, res.code)
 		}
 	}
+}
+
+const lockBody = `<D:lockinfo xmlns:D="DAV:"><D:lockscope><D:exclusive/></D:lockscope><D:locktype><D:write/></D:locktype></D:lockinfo>`
+
+// lockTimeout sends a LOCK on /dav/a.txt and returns the timeout the
+// response grants, failing unless the LOCK answers 200.
+func lockTimeout(t *testing.T, h http.Handler, header map[string]string) string {
+	t.Helper()
+	var body io.Reader
+	if header["If"] == "" {
+		body = strings.NewReader(lockBody)
+	}
+	res := do(t, h, "LOCK", "/dav/a.txt", body, header)
+	if res.code != http.StatusOK {
+		t.Fatalf("LOCK status = %d, want 200 (%s)", res.code, res.body)
+	}
+	_, after, _ := strings.Cut(res.body, "<D:timeout>")
+	granted, _, _ := strings.Cut(after, "</D:timeout>")
+	return granted
+}
+
+func TestLock_RootRefusedAndTimeoutCapped(t *testing.T) {
+	h := davfs.New(fixture(), davfs.Options{Prefix: "/dav"})
+	root := do(t, h, "LOCK", "/dav/", strings.NewReader(lockBody), map[string]string{"Depth": "infinity", "Timeout": "Infinite"})
+	if root.code != http.StatusForbidden {
+		t.Fatalf("LOCK on the mount root: status = %d, want 403", root.code)
+	}
+	if res := do(t, h, http.MethodPut, "/dav/b.txt", strings.NewReader("x"), nil); res.code != http.StatusCreated {
+		t.Fatalf("PUT after a refused root LOCK: status = %d, want 201", res.code)
+	}
+
+	cases := []struct {
+		name, timeout, want string
+		limit               time.Duration
+	}{
+		{"infinite, default cap", "Infinite", "Second-3600", 0},
+		{"absent, default cap", "", "Second-3600", 0},
+		{"over the cap", "Second-99999", "Second-60", time.Minute},
+		{"infinite with fallback", "Infinite, Second-99999", "Second-60", time.Minute},
+		{"under the cap", "Second-10", "Second-10", time.Minute},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := davfs.New(fixture(), davfs.Options{Prefix: "/dav", LockTimeout: c.limit})
+			header := map[string]string{"Depth": "0"}
+			if c.timeout != "" {
+				header["Timeout"] = c.timeout
+			}
+			if got := lockTimeout(t, h, header); got != c.want {
+				t.Fatalf("granted timeout = %q, want %q", got, c.want)
+			}
+		})
+	}
+
+	t.Run("refresh", func(t *testing.T) {
+		h := davfs.New(fixture(), davfs.Options{Prefix: "/dav", LockTimeout: time.Minute})
+		req := httptest.NewRequestWithContext(t.Context(), "LOCK", "/dav/a.txt", strings.NewReader(lockBody))
+		req.Header.Set("Depth", "0")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		token := rec.Header().Get("Lock-Token")
+		if rec.Code != http.StatusOK || token == "" {
+			t.Fatalf("LOCK status = %d, Lock-Token = %q", rec.Code, token)
+		}
+		if got := lockTimeout(t, h, map[string]string{"If": "(" + token + ")", "Timeout": "Infinite"}); got != "Second-60" {
+			t.Fatalf("refreshed timeout = %q, want Second-60", got)
+		}
+	})
 }

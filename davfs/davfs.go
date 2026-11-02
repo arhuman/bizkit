@@ -25,6 +25,9 @@
 //   - Bounded XML bodies: a PROPFIND, PROPPATCH or LOCK body over 1 MiB
 //     answers 413, before reading a body whose declared length is over it,
 //     and while streaming otherwise.
+//   - Bounded locks: a LOCK on the mount root answers 403, like every other
+//     change to "/", and every lock timeout, Infinite included, is capped at
+//     Options.LockTimeout, so no lock outlives it without a refresh.
 //   - Bounded listing: a PROPFIND with Depth infinity, or with no Depth header
 //     (which RFC 4918 reads as infinity), answers 403 with the
 //     propfind-finite-depth precondition instead of walking the whole mount.
@@ -34,7 +37,10 @@
 // permissions through Options.Authorize, listing filters, trash or soft
 // delete, version history and side channels such as a ".versions" route,
 // which the host dispatches before this handler. Locks are held in memory per
-// handler, so they do not survive a restart nor span several processes.
+// handler, so they do not survive a restart nor span several processes. A
+// lock taken by one client blocks every other client of the same handler: a
+// host serving several users through one Tree builds one handler per user, so
+// one user's locks never block another's.
 package davfs
 
 import (
@@ -44,6 +50,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -94,6 +101,9 @@ type Tree interface {
 	Rename(ctx context.Context, oldName, newName string) error
 }
 
+// defaultLockTimeout is the cap Options.LockTimeout zero stands for.
+const defaultLockTimeout = time.Hour
+
 // maxXMLBody caps a PROPFIND, PROPPATCH or LOCK body, which x/net/webdav
 // decodes whole: those bodies name properties and a lock owner, never content.
 const maxXMLBody = 1 << 20
@@ -119,6 +129,10 @@ type Options struct {
 	// MaxFileSize rejects a PUT or COPY body longer than this many bytes with
 	// 413. Zero means unlimited.
 	MaxFileSize int64
+	// LockTimeout caps the Timeout every LOCK request asks for, Infinite and
+	// an absent header included, so an abandoned lock always expires. Zero
+	// means one hour.
+	LockTimeout time.Duration
 	// Authorize, when set, is called before the Tree is touched with the
 	// request name and, for MOVE and COPY, again with the Destination name
 	// and OpWrite. An error wrapping bizkit.ErrForbidden answers 403, one
@@ -141,6 +155,10 @@ var Methods = []string{
 // New returns a WebDAV handler serving tree under opts.Prefix.
 func New(tree Tree, opts Options) http.Handler {
 	prefix := strings.TrimSuffix(opts.Prefix, "/")
+	lockTimeout := opts.LockTimeout
+	if lockTimeout <= 0 {
+		lockTimeout = defaultLockTimeout
+	}
 	return &handler{
 		dav: &webdav.Handler{
 			Prefix:     prefix,
@@ -148,17 +166,19 @@ func New(tree Tree, opts Options) http.Handler {
 			LockSystem: webdav.NewMemLS(),
 			Logger:     opts.Logger,
 		},
-		prefix:    prefix,
-		maxSize:   opts.MaxFileSize,
-		authorize: opts.Authorize,
+		prefix:      prefix,
+		maxSize:     opts.MaxFileSize,
+		lockTimeout: lockTimeout,
+		authorize:   opts.Authorize,
 	}
 }
 
 type handler struct {
-	dav       *webdav.Handler
-	prefix    string
-	maxSize   int64
-	authorize func(ctx context.Context, op Op, name string) error
+	dav         *webdav.Handler
+	prefix      string
+	maxSize     int64
+	lockTimeout time.Duration
+	authorize   func(ctx context.Context, op Op, name string) error
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -180,7 +200,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeStatus(w, statusOf(err))
 		return
 	}
-	if h.refused(w, r) {
+	if h.refused(w, r, name) {
 		return
 	}
 
@@ -190,6 +210,9 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if dest != "" {
 		r2.Header.Set("Destination", h.prefix+dest)
 	}
+	if r.Method == "LOCK" {
+		r2.Header.Set("Timeout", capTimeout(r.Header.Get("Timeout"), h.lockTimeout))
+	}
 	if xmlMethod(r.Method) {
 		r2.Body = xmlBody{ReadCloser: http.MaxBytesReader(w, r.Body, maxXMLBody), out: out}
 	}
@@ -198,8 +221,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // refused answers a request davfs rejects from its headers alone, before
 // x/net/webdav reads a body or touches the Tree, and reports whether it did.
-func (h *handler) refused(w http.ResponseWriter, r *http.Request) bool {
+func (h *handler) refused(w http.ResponseWriter, r *http.Request, name string) bool {
 	switch {
+	case r.Method == "LOCK" && name == "/":
+		writeStatus(w, http.StatusForbidden)
 	case r.Method == http.MethodPut && h.maxSize > 0 && r.ContentLength > h.maxSize:
 		writeStatus(w, http.StatusRequestEntityTooLarge)
 	case xmlMethod(r.Method) && r.ContentLength > maxXMLBody:
@@ -210,6 +235,27 @@ func (h *handler) refused(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	return true
+}
+
+// capTimeout returns the LOCK Timeout header x/net/webdav must honour: the
+// requested seconds when under limit, else limit. A header x/net/webdav would
+// reject is returned unchanged, so it still answers 400.
+func capTimeout(hdr string, limit time.Duration) string {
+	capped := "Second-" + strconv.FormatInt(max(int64(limit/time.Second), 1), 10)
+	first, _, _ := strings.Cut(hdr, ",")
+	first = strings.TrimSpace(first)
+	if first == "" || first == "Infinite" {
+		return capped
+	}
+	digits, ok := strings.CutPrefix(first, "Second-")
+	secs, err := strconv.ParseUint(digits, 10, 32)
+	if !ok || err != nil {
+		return hdr
+	}
+	if time.Duration(secs)*time.Second < limit {
+		return first
+	}
+	return capped
 }
 
 func xmlMethod(method string) bool {

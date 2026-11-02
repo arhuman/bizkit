@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `davfs`: LOCK on the mount root now answers 403, and every lock timeout, `Infinite` or absent included, is capped by the new `Options.LockTimeout` (zero means one hour). A single root lock used to block every PUT, DELETE and LOCK from other clients until the process restarted.
 - `blob/local`: `Put` now refuses a key with a segment starting with `.bizkit-tmp-` with `ErrForbidden`. It used to store the object, which `Stat` and `Open` found but `List` never returned.
 - `davfs`: a PROPFIND, PROPPATCH or LOCK body over 1 MiB now answers 413, whether its length is declared or streamed. It used to be decoded whole, whatever its size.
 - `davfs`: a Depth 1 PROPFIND no longer opens file contents or lists subdirectories; the Tree reader opens on the first read and a directory lists on the first Readdir. It used to call `Tree.Open` on every listed file, a GET per file on `blob/s3`.
