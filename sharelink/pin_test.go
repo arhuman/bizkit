@@ -2,6 +2,7 @@ package sharelink
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -26,34 +27,38 @@ func TestPIN_LocksAfterFiveFailures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var st PINState
-	now := t0
+	locked := PINState{LockedUntil: t0.Add(15 * time.Minute)}
+	type step struct {
+		name      string
+		at        time.Duration
+		pin       string
+		wantErr   error
+		wantState PINState
+	}
+	var steps []step
 	for i := 1; i < 5; i++ {
-		st, err = h.Check(st, now, hash, "0000")
-		if !errors.Is(err, ErrWrongPIN) || errors.Is(err, bizkit.ErrLocked) {
-			t.Fatalf("failure %d: err = %v, want ErrWrongPIN only", i, err)
+		steps = append(steps, step{fmt.Sprintf("failure %d", i), 0, "0000", ErrWrongPIN, PINState{Failures: i}})
+	}
+	steps = append(steps,
+		step{"5th failure locks", 0, "0000", bizkit.ErrLocked, locked},
+		step{"right PIN during lock", 15*time.Minute - time.Second, "1234", bizkit.ErrLocked, locked},
+		step{"right PIN after lock", 15 * time.Minute, "1234", nil, PINState{}},
+	)
+	// Steps share st, so a failed step stops the sequence.
+	var st PINState
+	for _, s := range steps {
+		ok := t.Run(s.name, func(t *testing.T) {
+			st, err = h.Check(st, t0.Add(s.at), hash, s.pin)
+			if !errors.Is(err, s.wantErr) || (s.wantErr == ErrWrongPIN && errors.Is(err, bizkit.ErrLocked)) {
+				t.Fatalf("err = %v, want %v only", err, s.wantErr)
+			}
+			if st != s.wantState {
+				t.Fatalf("state = %+v, want %+v", st, s.wantState)
+			}
+		})
+		if !ok {
+			return
 		}
-		if st.Failures != i {
-			t.Fatalf("failure %d: Failures = %d", i, st.Failures)
-		}
-	}
-	st, err = h.Check(st, now, hash, "0000")
-	if !errors.Is(err, bizkit.ErrLocked) {
-		t.Fatalf("5th failure: err = %v, want ErrLocked", err)
-	}
-	if want := now.Add(15 * time.Minute); !st.LockedUntil.Equal(want) || st.Failures != 0 {
-		t.Fatalf("state after lock = %+v, want LockedUntil %v and Failures 0", st, want)
-	}
-
-	locked := st
-	st, err = h.Check(st, now.Add(15*time.Minute-time.Second), hash, "1234")
-	if !errors.Is(err, bizkit.ErrLocked) || st != locked {
-		t.Fatalf("right PIN during lock: err = %v state = %+v, want ErrLocked and unchanged", err, st)
-	}
-
-	st, err = h.Check(st, now.Add(15*time.Minute), hash, "1234")
-	if err != nil || st != (PINState{}) {
-		t.Fatalf("right PIN after lock: err = %v state = %+v, want nil and zero state", err, st)
 	}
 }
 

@@ -2,6 +2,7 @@ package sharelink
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/arhuman/bizkit"
@@ -23,22 +24,40 @@ func TestUpload_Validate(t *testing.T) {
 
 func TestUpload_LimitsNarrowsToRemainder(t *testing.T) {
 	base := fileserve.Limits{MaxFiles: 10, MaxTotal: 1 << 20, MaxFieldSize: 7}
-	got, err := UploadCaps{MaxFiles: 5, MaxBytes: 1000}.Limits(base, 3, 400)
-	if err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		name       string
+		caps       UploadCaps
+		base       fileserve.Limits
+		usedFiles  int
+		usedBytes  int64
+		wantLimits fileserve.Limits
+	}{
+		{
+			name: "remainder below base", caps: UploadCaps{MaxFiles: 5, MaxBytes: 1000}, base: base,
+			usedFiles: 3, usedBytes: 400,
+			wantLimits: fileserve.Limits{MaxFiles: 2, MaxTotal: 600, MaxFileSize: 600, MaxFieldSize: 7},
+		},
+		{
+			name: "caps above defaults keep them", caps: UploadCaps{MaxFiles: 1000, MaxBytes: 10240 << 20},
+			wantLimits: fileserve.Limits{
+				MaxFiles: fileserve.DefaultMaxFiles, MaxTotal: fileserve.DefaultMaxTotal, MaxFileSize: fileserve.DefaultMaxFileSize,
+			},
+		},
+		{
+			name: "no caps keep base", base: base, usedFiles: 999, usedBytes: 1 << 40,
+			wantLimits: base,
+		},
 	}
-	if got.MaxFiles != 2 || got.MaxTotal != 600 || got.MaxFileSize != 600 || got.MaxFieldSize != 7 {
-		t.Fatalf("limits = %+v", got)
-	}
-
-	got, _ = UploadCaps{MaxFiles: 1000, MaxBytes: 10240 << 20}.Limits(fileserve.Limits{}, 0, 0)
-	if got.MaxFiles != fileserve.DefaultMaxFiles || got.MaxTotal != fileserve.DefaultMaxTotal || got.MaxFileSize != fileserve.DefaultMaxFileSize {
-		t.Fatalf("caps above defaults changed them: %+v", got)
-	}
-
-	got, _ = UploadCaps{}.Limits(base, 999, 1<<40)
-	if got.MaxFiles != base.MaxFiles || got.MaxTotal != base.MaxTotal || got.MaxFileSize != base.MaxFileSize {
-		t.Fatalf("no caps changed base: %+v", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.caps.Limits(tt.base, tt.usedFiles, tt.usedBytes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, tt.wantLimits) {
+				t.Fatalf("limits = %+v, want %+v", got, tt.wantLimits)
+			}
+		})
 	}
 }
 

@@ -86,22 +86,21 @@ func TestUpload_StreamsPartsAndFields(t *testing.T) {
 		formPart{name: "empty", file: "", body: ""},
 		formPart{name: "file", file: "b.bin", body: "bb"},
 	)
-	p, err := u.Next()
-	if err != nil {
-		t.Fatal(err)
+	wantParts := []struct{ form, file, ctype string }{
+		{"file", "a.PDF", "application/pdf"},
+		{"file", "b.bin", defaultContentType},
 	}
-	if p.FormName != "file" || p.FileName != "a.PDF" || p.ContentType != "application/pdf" {
-		t.Errorf("part = %q %q %q", p.FormName, p.FileName, p.ContentType)
+	for i, want := range wantParts {
+		p, err := u.Next()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.FormName != want.form || p.FileName != want.file || p.ContentType != want.ctype {
+			t.Errorf("part %d = %q %q %q, want %q %q %q", i, p.FormName, p.FileName, p.ContentType, want.form, want.file, want.ctype)
+		}
 	}
 	if got := u.Fields().Get("note"); got != "hello" {
 		t.Errorf("note = %q, want hello", got)
-	}
-	p, err = u.Next()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p.FileName != "b.bin" || p.ContentType != defaultContentType {
-		t.Errorf("second part = %q %q", p.FileName, p.ContentType)
 	}
 	if _, ok := u.Fields()["empty"]; !ok {
 		t.Error("empty-filename part not recorded as a field")
@@ -227,21 +226,18 @@ func TestUpload_MalformedBody(t *testing.T) {
 	}
 }
 
-// TestUpload_StreamsWithoutBuffering proves Next hands out a part before its
-// body is complete: the writer holds the rest of the part until the test has
-// read the first chunk, which would deadlock if anything buffered it whole.
-func TestUpload_StreamsWithoutBuffering(t *testing.T) {
+// heldUpload streams a multipart body with one file part of n+1 chunks. It
+// writes the first chunk, then holds the rest until proceed is closed.
+func heldUpload(chunk []byte, n int, proceed <-chan struct{}) (body io.Reader, contentType string) {
 	pr, pw := io.Pipe()
 	mw := multipart.NewWriter(pw)
-	proceed := make(chan struct{})
-	chunk := bytes.Repeat([]byte("a"), 4096)
 	go func() {
 		w, err := mw.CreateFormFile("file", "big.bin")
 		if err == nil {
 			_, err = w.Write(chunk)
 		}
 		<-proceed
-		for i := 0; err == nil && i < 256; i++ {
+		for i := 0; err == nil && i < n; i++ {
 			_, err = w.Write(chunk)
 		}
 		if err == nil {
@@ -249,8 +245,18 @@ func TestUpload_StreamsWithoutBuffering(t *testing.T) {
 		}
 		pw.CloseWithError(err)
 	}()
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/upload", pr)
-	req.Header.Set("Content-Type", mw.FormDataContentType())
+	return pr, mw.FormDataContentType()
+}
+
+// TestUpload_StreamsWithoutBuffering proves Next hands out a part before its
+// body is complete: the writer holds the rest of the part until the test has
+// read the first chunk, which would deadlock if anything buffered it whole.
+func TestUpload_StreamsWithoutBuffering(t *testing.T) {
+	proceed := make(chan struct{})
+	chunk := bytes.Repeat([]byte("a"), 4096)
+	body, ctype := heldUpload(chunk, 256, proceed)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/upload", body)
+	req.Header.Set("Content-Type", ctype)
 	u, err := NewReader(req, Limits{})
 	if err != nil {
 		t.Fatal(err)

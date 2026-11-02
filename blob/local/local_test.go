@@ -194,18 +194,36 @@ func TestPrefixCannotBeReplacedOrDeleted(t *testing.T) {
 	if _, err := s.Put(ctx, "dir/a.txt", strings.NewReader("a"), blob.PutOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Put(ctx, "dir", strings.NewReader("x"), blob.PutOptions{}); err == nil {
-		t.Error("Put onto a prefix: want error")
+	ops := []struct {
+		name string
+		do   func() error
+	}{
+		{"Put onto a prefix", func() error {
+			_, err := s.Put(ctx, "dir", strings.NewReader("x"), blob.PutOptions{})
+			return err
+		}},
+		{"Delete of a prefix", func() error { return s.Delete(ctx, "dir") }},
 	}
-	if err := s.Delete(ctx, "dir"); err == nil || errors.Is(err, bizkit.ErrNotFound) {
-		t.Errorf("Delete of a prefix err = %v, want a non-NotFound error", err)
+	for _, op := range ops {
+		t.Run(op.name, func(t *testing.T) {
+			if err := op.do(); err == nil || errors.Is(err, bizkit.ErrNotFound) {
+				t.Errorf("err = %v, want a non-NotFound error", err)
+			}
+		})
 	}
+	requireOnlyObject(t, s, "dir", "dir/a.txt")
+}
+
+// requireOnlyObject fails unless key is the store's single object and dir
+// its single root entry, which rules out a leftover temporary.
+func requireOnlyObject(t *testing.T, s *Store, dir, key string) {
+	t.Helper()
 	entries, err := os.ReadDir(s.root)
-	if err != nil || len(entries) != 1 || entries[0].Name() != "dir" {
-		t.Fatalf("root entries = %v, %v; want only dir (no leftover temporary)", entries, err)
+	if err != nil || len(entries) != 1 || entries[0].Name() != dir {
+		t.Fatalf("root entries = %v, %v; want only %s (no leftover temporary)", entries, err, dir)
 	}
-	if got, err := s.List(ctx, ""); err != nil || len(got) != 1 || got[0].Key != "dir/a.txt" {
-		t.Fatalf("List = %v, %v; want only dir/a.txt", got, err)
+	if got, err := s.List(t.Context(), ""); err != nil || len(got) != 1 || got[0].Key != key {
+		t.Fatalf("List = %v, %v; want only %s", got, err, key)
 	}
 }
 
