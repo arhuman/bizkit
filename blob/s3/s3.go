@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"slices"
 	"strings"
 
@@ -44,6 +45,9 @@ type Config struct {
 	// empty the client uses the instance IAM role.
 	AccessKeyID     string
 	SecretAccessKey string
+	// Transport carries every request to the store, for a caller that must
+	// control dialing or proxying. Nil uses the client's default transport.
+	Transport http.RoundTripper
 }
 
 // Store stores objects in one S3 bucket under a key prefix. It is safe for
@@ -68,7 +72,7 @@ func New(cfg Config) (*Store, error) {
 	if cfg.AccessKeyID != "" || cfg.SecretAccessKey != "" {
 		creds = credentials.NewStaticV4(cfg.AccessKeyID, cfg.SecretAccessKey, "")
 	}
-	client, err := minio.New(host, &minio.Options{Creds: creds, Secure: secure, Region: cfg.Region})
+	client, err := minio.New(host, &minio.Options{Creds: creds, Secure: secure, Region: cfg.Region, Transport: cfg.Transport})
 	if err != nil {
 		return nil, fmt.Errorf("blob/s3: new client: %w", err)
 	}

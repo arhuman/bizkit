@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/iotest"
+	"time"
 
 	"github.com/minio/minio-go/v7"
 
@@ -125,6 +128,30 @@ func TestUnreachable(t *testing.T) {
 	}
 	if _, err := s.List(ctx, "dir/"); notFound(err) {
 		t.Errorf("List err = %v, want a transport error", err)
+	}
+}
+
+// notFoundTransport answers every request 404 and counts them.
+type notFoundTransport struct{ calls atomic.Int32 }
+
+func (rt *notFoundTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	rt.calls.Add(1)
+	return &http.Response{StatusCode: http.StatusNotFound, Header: http.Header{}, Body: http.NoBody, Request: r}, nil
+}
+
+func TestNew_RequestsGoThroughTransport(t *testing.T) {
+	rt := &notFoundTransport{}
+	s, err := New(Config{Endpoint: "http://127.0.0.1:1", Region: "us-east-1", Bucket: "bucket", AccessKeyID: "k", SecretAccessKey: "s", Transport: rt})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := s.Stat(ctx, "k"); !errors.Is(err, bizkit.ErrNotFound) {
+		t.Errorf("Stat err = %v, want ErrNotFound from the transport's 404", err)
+	}
+	if rt.calls.Load() == 0 {
+		t.Error("the configured transport received no request")
 	}
 }
 
