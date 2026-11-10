@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-10
+
 ### Added
 
 - `blob/s3`: `Config.Transport` sets the `http.RoundTripper` every request to the store goes through, for a caller that must control dialing or proxying. Nil keeps the client's default transport.
